@@ -30,10 +30,10 @@ struct Theme: Identifiable {
               main: hex(0x9646FF), middle: hex(0x6E5AFF), accent: hex(0xDC50E6), bright: hex(0x00D2FF), deep: hex(0x100A26), legacy: true),
     ]
 
-    static func get(_ id: String) -> Theme { all.first { $0.id == id } ?? all[0] }
+    static func named(_ id: String) -> Theme { all.first { $0.id == id } ?? all[0] }
 
     /// The theme chosen in the settings.
-    static var current: Theme { get(Settings.shared.theme) }
+    static var current: Theme { named(Settings.shared.theme) }
 
     private static func hex(_ value: UInt32) -> Color {
         Color(red: Double((value >> 16) & 0xFF) / 255, green: Double((value >> 8) & 0xFF) / 255, blue: Double(value & 0xFF) / 255)
