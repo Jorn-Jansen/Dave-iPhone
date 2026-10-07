@@ -32,7 +32,8 @@ actor PhotoIndex {
         // Look at the photos that are new since last time
         let missing = assets.filter { labels[$0.localIdentifier] == nil }
         var done = 0
-        for chunk in stride(from: 0, to: missing.count, by: 8).map({ Array(missing[$0..<min($0 + 8, missing.count)]) }) {
+        if !missing.isEmpty { progress(0, missing.count) } // shows right away that the photos are being looked at
+        for chunk in stride(from: 0, to: missing.count, by: 6).map({ Array(missing[$0..<min($0 + 6, missing.count)]) }) {
             if Task.isCancelled { break }
             let found = await withTaskGroup(of: (String, [String: Float]).self) { group in
                 for asset in chunk { group.addTask { (asset.localIdentifier, await Self.recognise(asset)) } }
@@ -40,10 +41,10 @@ actor PhotoIndex {
                 for await result in group { results.append(result) }
                 return results
             }
-            for (id, things) in found { labels[id] = things }
+            for (id, things) in found where things != Self.skipped { labels[id] = things } // skipped: tried again next time
             done += chunk.count
             progress(done, missing.count)
-            if done % 200 < 8 { save() }
+            if done % 200 < 6 { save() }
         }
         if !missing.isEmpty { save() }
 
@@ -60,8 +61,11 @@ actor PhotoIndex {
     }
 
     /// What's in one photo: Apple's image recognition on a small version of it.
+    /// A photo that couldn't be had in time (still in iCloud): not remembered, so it's tried again next time.
+    private static let skipped: [String: Float] = ["_skipped": 1]
+
     private static func recognise(_ asset: PHAsset) async -> [String: Float] {
-        guard let image = await thumbnail(asset), let cgImage = image.cgImage else { return [:] }
+        guard let image = await thumbnail(asset), let cgImage = image.cgImage else { return skipped }
         let request = VNClassifyImageRequest()
         do {
             try VNImageRequestHandler(cgImage: cgImage, options: [:]).perform([request])
@@ -73,17 +77,33 @@ actor PhotoIndex {
         return things
     }
 
+    /// A small version of the photo. Photos that are only in iCloud get downloaded, but iOS can keep you waiting a long
+    /// time for those: after 8 seconds it's skipped (looked at again on the next search), so one photo can't hold up the rest.
     private static func thumbnail(_ asset: PHAsset) async -> UIImage? {
-        await withCheckedContinuation { done in
-            let options = PHImageRequestOptions()
-            options.deliveryMode = .highQualityFormat // one answer, not a blurry one first
-            options.resizeMode = .fast
-            options.isNetworkAccessAllowed = true // photos that are only in iCloud
-            options.isSynchronous = false
-            PHImageManager.default().requestImage(for: asset, targetSize: CGSize(width: 360, height: 360), contentMode: .aspectFit,
-                                                  options: options) { image, _ in done.resume(returning: image) }
+        let request = Request()
+        return await withTaskGroup(of: UIImage?.self) { group in
+            group.addTask {
+                await withCheckedContinuation { done in
+                    let options = PHImageRequestOptions()
+                    options.deliveryMode = .highQualityFormat // one answer, not a blurry one first
+                    options.resizeMode = .fast
+                    options.isNetworkAccessAllowed = true // photos that are only in iCloud
+                    request.id = PHImageManager.default().requestImage(for: asset, targetSize: CGSize(width: 360, height: 360),
+                                                                       contentMode: .aspectFit, options: options) { image, _ in done.resume(returning: image) }
+                }
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: 8_000_000_000)
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            if first == nil { PHImageManager.default().cancelImageRequest(request.id) } // its handler then answers (nil), ending the wait
+            return first
         }
     }
+
+    private final class Request: @unchecked Sendable { var id: PHImageRequestID = 0 }
 
     private func load() {
         guard !loaded else { return }
