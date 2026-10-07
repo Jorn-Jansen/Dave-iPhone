@@ -34,7 +34,11 @@ final class Brain: ObservableObject {
         case .idle: work = Task { await listen() }
         case .listening: stopRequested = true // the listening loop stops the recording and sends it
         case .speaking: voice.stopSpeaking()
-        case .thinking: work?.cancel()
+        case .thinking:
+            // Stop right away: whatever comes back later is ignored (the work notices it was cancelled)
+            work?.cancel()
+            progress = nil
+            stopped()
         }
     }
 
@@ -45,8 +49,10 @@ final class Brain: ObservableObject {
         work = Task { await ask(text) }
     }
 
-    /// Cancelled (tapped the orb while thinking): back to waiting, without an error.
+    /// Cancelled (tapped the orb while thinking): back to waiting, without an error. Once: the orb already says it right
+    /// away, and the cancelled work says it again when it notices.
     private func stopped() {
+        guard state == .thinking else { return }
         add(Line(fromUser: false, text: settings.say("⏹ Stopped.", "⏹ Gestopt.")))
         state = .idle
     }
@@ -128,6 +134,7 @@ final class Brain: ObservableObject {
         do {
             let tools = PhoneTools.definitions + (settings.hasPC ? [pcControlTool, pcTool] : [])
             let message = try await Groq.chat(messages: messages, tools: tools, settings: settings)
+            if Task.isCancelled { stopped(); return } // stopped while the AI was answering: ignore its answer
             if let calls = message["tool_calls"] as? [[String: Any]], let call = calls.first,
                let function = call["function"] as? [String: Any], let name = function["name"] as? String {
                 let argumentText = function["arguments"] as? String ?? "{}"
