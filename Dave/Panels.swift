@@ -19,12 +19,33 @@ final class PCData: ObservableObject {
     @Published var disliked: [Song] = []
     @Published var problem: String?
     @Published var loaded = false
+    @Published var updating = false
 
     private let settings = Settings.shared
+    private let cacheKey = "pcState"
+
+    /// What the tabs showed last time, so they're filled right away (and stay filled when the PC can't be reached).
+    init() {
+        if let data = UserDefaults.standard.data(forKey: cacheKey),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            apply(json, fresh: false)
+        }
+    }
 
     func refresh() async {
-        guard settings.hasPC else { return }
-        do { apply(try await PCLink.state(settings: settings)) } catch { problem = error.localizedDescription }
+        guard settings.hasPC, !updating else { return } // one fetch at a time (every tab asks when it opens)
+        updating = true
+        defer { updating = false }
+        for attempt in 0..<3 {
+            do {
+                apply(try await PCLink.state(settings: settings))
+                return
+            } catch {
+                if error is CancellationError { return }
+                if attempt == 2 { problem = error.localizedDescription }
+                else { try? await Task.sleep(nanoseconds: UInt64(attempt + 1) * 1_500_000_000) }
+            }
+        }
     }
 
     /// A change from a tab ("deleteReminder", "addMemory"…), done by Dave on the PC.
@@ -32,7 +53,8 @@ final class PCData: ObservableObject {
         do { apply(try await PCLink.change(change, settings: settings)) } catch { problem = error.localizedDescription }
     }
 
-    private func apply(_ json: [String: Any]) {
+    private func apply(_ json: [String: Any], fresh: Bool = true) {
+        if fresh, let data = try? JSONSerialization.data(withJSONObject: json) { UserDefaults.standard.set(data, forKey: cacheKey) }
         func list(_ key: String, in object: [String: Any]? = nil) -> [[String: Any]] { ((object ?? json)[key] as? [Any])?.compactMap { $0 as? [String: Any] } ?? [] }
         func song(_ d: [String: Any]) -> Song { Song(title: d["title"] as? String ?? "", artist: d["artist"] as? String ?? "", at: d["at"] as? String ?? "") }
         reminders = list("reminders").map { Reminder(id: $0["id"] as? String ?? "", message: $0["message"] as? String ?? "",
@@ -48,9 +70,11 @@ final class PCData: ObservableObject {
         nowPlaying = (music?["now"] as? [String: Any]).map(song)
         history = list("history", in: music).map(song)
         disliked = list("disliked", in: music).map(song)
-        problem = nil
         loaded = true
-        settings.pcLinked = true
+        if fresh {
+            problem = nil
+            settings.pcLinked = true
+        }
     }
 }
 
@@ -73,7 +97,15 @@ struct Panel<Content: View>: View {
             AuroraBackground()
             VStack(spacing: 0) {
                 HStack {
-                    Text(title).font(.largeTitle.bold())
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title).font(.largeTitle.bold())
+                        if data.updating {
+                            Text(settings.say("Updating…", "Bijwerken…")).font(.caption).foregroundStyle(.white.opacity(0.6))
+                        } else if data.problem != nil && data.loaded {
+                            Text(settings.say("⚠️ PC not reachable: showing the last data", "⚠️ Pc niet bereikbaar: laatste gegevens"))
+                                .font(.caption).foregroundStyle(.orange)
+                        }
+                    }
                     Spacer()
                     Button { showSettings = true } label: {
                         Image(systemName: "gearshape.fill").font(.title3).foregroundStyle(.white.opacity(0.8))
@@ -83,8 +115,9 @@ struct Panel<Content: View>: View {
                 .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 4)
                 if !settings.hasPC {
                     note(settings.say("Connect me to your PC (⚙) to see this here.", "Koppel me aan je pc (⚙) om dit hier te zien."))
-                } else if let problem = data.problem, !data.loaded {
-                    note("⚠️ " + problem)
+                } else if !data.loaded {
+                    if let problem = data.problem { note("⚠️ " + problem) }
+                    else { VStack { Spacer(); ProgressView().controlSize(.large).tint(.white); Spacer() } }
                 } else {
                     content
                 }
