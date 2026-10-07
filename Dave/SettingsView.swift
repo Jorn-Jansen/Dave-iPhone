@@ -6,6 +6,7 @@ struct SettingsView: View {
     @State private var pairing = false
     @State private var pairStatus = ""
     @State private var spotifyStatus = ""
+    @State private var pcVersion: String?
 
     private func spotifyLogIn() async {
         do {
@@ -111,12 +112,18 @@ struct SettingsView: View {
                                       "Voor een natuurlijkere stem: iOS-instellingen → Toegankelijkheid → Gesproken materiaal → Stemmen → download een Verbeterde of Premium stem."))
                 }
 
-                if !settings.memories.isEmpty {
-                    Section(settings.say("What I remember (from the PC)", "Wat ik onthoud (van de pc)")) {
-                        ForEach(settings.memories, id: \.self) { Text($0).font(.footnote) }
+                Section(settings.say("About", "Over")) {
+                    LabeledContent(settings.say("Dave on this iPhone", "Dave op deze iPhone"),
+                                   value: "\(Updater.currentVersion) (build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"))")
+                    if settings.hasPC {
+                        LabeledContent(settings.say("Dave on your PC", "Dave op je pc"),
+                                       value: pcVersion ?? settings.say("not reachable", "niet bereikbaar"))
                     }
+                    Link(settings.say("All versions and what's new", "Alle versies en wat er nieuw is"),
+                         destination: URL(string: "https://github.com/Jorn-Jansen/Dave-iPhone/releases")!)
                 }
             }
+            .task { if settings.hasPC { pcVersion = await PCLink.version(settings: settings) } }
             .scrollContentBackground(.hidden)
             .background(Color.daveDeep)
             .navigationTitle(settings.say("Settings", "Instellingen"))

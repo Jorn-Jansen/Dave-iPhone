@@ -25,6 +25,25 @@ enum PCLink {
         return reply["answer"] as? String ?? settings.say("Done.", "Klaar.")
     }
 
+    /// What Dave's window on the PC shows: reminders, memories, what he's watching for, music, screen time.
+    static func state(settings: Settings) async throws -> [String: Any] {
+        try await hello(settings: settings)
+        return try await post("/state", body: [:], settings: settings, timeout: 15)
+    }
+
+    /// A change from the app's tabs ("deleteReminder", "addMemory"…); returns the new state.
+    static func change(_ change: [String: Any], settings: Settings) async throws -> [String: Any] {
+        try await post("/action", body: change, settings: settings, timeout: 15)
+    }
+
+    /// The PC Dave's version ("1.4.0"), or nil when he can't be reached.
+    static func version(settings: Settings) async -> String? {
+        guard let url = try? url("/hello", settings: settings) else { return nil }
+        guard let (data, _) = try? await URLSession.shared.data(for: URLRequest(url: url, timeoutInterval: 5)),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return json["version"] as? String
+    }
+
     /// Connect: checks the code and gets the PC Dave's name, languages, Groq key and memories.
     static func pair(settings: Settings) async throws -> [String: Any] {
         try await hello(settings: settings)
@@ -63,6 +82,10 @@ enum PCLink {
         do { (data, response) = try await URLSession.shared.data(for: request) }
         catch { throw explain(error, settings: settings) }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if status == 404 {
+            throw Failure(message: settings.say("Dave on your PC is too old for this: update him to the newest version (right-click his tray icon → Check for updates).",
+                                                "Dave op je pc is hier te oud voor: update hem naar de nieuwste versie (rechtsklik zijn icoon bij de klok → Controleren op updates)."))
+        }
         if status == 401 { throw Failure(message: settings.say("The code is wrong. Check it in Dave's settings on the PC, under iPhone app.", "De code klopt niet. Kijk in de instellingen van Dave op de pc, bij iPhone-app.")) }
         guard status == 200, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw Failure(message: settings.say("Your PC gave an odd answer (\(status)).", "Je pc gaf een vreemd antwoord (\(status))."))
