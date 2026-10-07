@@ -26,10 +26,12 @@ enum PhoneTools {
                  ["name": str("The shortcut's name, exactly as the user said it")], required: ["name"]),
             tool("use_clipboard", "Work with what the user copied on the iPhone (text or a picture): read it out, summarise, translate, explain, what's in the picture.",
                  ["task": str("What to do with it, in the user's words")], required: ["task"]),
-            tool("photos", "The user's photos: look at one ('what's in my last screenshot', 'read the text on my last photo') "
-                 + "or find them by date, kind or favourites ('how many photos did I take yesterday', 'show my favourites from last week'). "
-                 + "Not by what's in them, except the newest few.",
+            tool("photos", "The user's photos: look at one ('what's in my last screenshot', 'read the text on my last photo'), "
+                 + "find them by what's in them ('find my photos of a dog', 'pictures of the beach'), "
+                 + "or by date, kind or favourites ('how many photos did I take yesterday', 'show my favourites from last week').",
                  ["action": ["type": "string", "enum": ["look", "find"], "description": "look = answer about the picture(s); find = count and show them"],
+                  "content": str("Only to find photos by what's in them: simple English words (singular), comma-separated, with close "
+                                 + "alternatives, e.g. 'dog, puppy' or 'beach, sea' or 'food' or 'car'"),
                   "question": str("For look: the user's question about the picture(s)"),
                   "kind": ["type": "string", "enum": ["any", "photo", "screenshot", "selfie", "video", "favorite"]],
                   "from_date": str("First day, yyyy-MM-dd, if a period was said"),
@@ -225,6 +227,13 @@ enum PhoneTools {
             }
         }
         return FoundPhotos(total: result.count, images: images, dates: dates)
+    }
+
+    /// Pictures of [assets] (in order), e.g. to show what a search found.
+    static func images(of assets: [PHAsset], size: CGFloat) async -> [UIImage] {
+        var images: [UIImage] = []
+        for asset in assets { if let image = await load(asset, size: size) { images.append(image) } }
+        return images
     }
 
     private static func load(_ asset: PHAsset, size: CGFloat) async -> UIImage? {
