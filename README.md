@@ -2,6 +2,15 @@
 
 Dave, the voice assistant, as an iPhone app. Tap the orb and talk (English or Dutch), or type. He answers out loud, searches the web for anything current, and can hand things to [Dave on your Windows PC](https://github.com/Jorn-Jansen/Dave-Windows): "pause the music on my PC", "lock my PC", "what did I miss on Discord?".
 
+## What he can do on the iPhone
+- **Apps:** "open Spotify", "search lofi in Spotify", "directions to Utrecht", "open reddit.com"
+- **Shortcuts:** "run my shortcut Goodnight" (a Siri Shortcut can open any app or change settings)
+- **Clipboard:** "what did I copy?", "translate what I copied", "what's in the picture I copied?"
+- **Photos:** "what's in my last screenshot?", "how many photos did I take yesterday?", "show my favourites from last week"
+- **Files:** "read this file", "summarise a PDF" (you pick the file)
+
+iOS only lets apps open other apps through links (most well-known apps have one), and only lets them see files you pick.
+
 ## Install
 Dave isn't in the App Store, so you sideload him with your own Apple ID:
 1. Download **Dave.ipa** from the latest [release](../../releases) (or the newest run under **Actions**).
