@@ -17,6 +17,14 @@ enum PCLink {
         return reply["answer"] as? String ?? settings.say("Done.", "Klaar.")
     }
 
+    /// A command the phone's AI already chose ("media_control" with action "pause", "lock_pc"…): the PC carries it out
+    /// right away, without asking its own AI. Returns the outcome ("⏸ Paused").
+    static func command(_ name: String, args: [String: Any], settings: Settings) async throws -> String {
+        try await hello(settings: settings)
+        let reply = try await post("/command", body: ["name": name, "args": args], settings: settings, timeout: 30)
+        return reply["answer"] as? String ?? settings.say("Done.", "Klaar.")
+    }
+
     /// Connect: checks the code and gets the PC Dave's name, languages, Groq key and memories.
     static func pair(settings: Settings) async throws -> [String: Any] {
         try await hello(settings: settings)

@@ -125,7 +125,7 @@ final class Brain: ObservableObject {
         messages.append(["role": "user", "content": "\(context)\n\n\(text)"])
 
         do {
-            let tools = PhoneTools.definitions + (settings.hasPC ? [pcTool] : [])
+            let tools = PhoneTools.definitions + (settings.hasPC ? [pcControlTool, pcTool] : [])
             let message = try await Groq.chat(messages: messages, tools: tools, settings: settings)
             if let calls = message["tool_calls"] as? [[String: Any]], let call = calls.first,
                let function = call["function"] as? [String: Any], let name = function["name"] as? String {
@@ -167,6 +167,21 @@ final class Brain: ObservableObject {
                 return (error.localizedDescription, [])
             }
 
+        case "pc_control":
+            // The command is chosen here: the PC carries it out without asking its own AI (faster, half the AI use)
+            var pcArgs = args
+            let command = pcArgs.removeValue(forKey: "command") as? String ?? ""
+            do {
+                let reply = try await PCLink.command(command, args: pcArgs, settings: settings)
+                settings.pcLinked = true
+                return (reply, [])
+            } catch {
+                if Task.isCancelled || error is CancellationError { throw CancellationError() }
+                settings.pcLinked = false
+                return (error.localizedDescription, [])
+            }
+
+        case "music": return (try await PhoneTools.music(args, settings: settings), [])
         case "open_app": return (await PhoneTools.openApp(args, settings: settings), [])
         case "run_shortcut": return (await PhoneTools.runShortcut(args, settings: settings), [])
 
@@ -263,6 +278,39 @@ final class Brain: ObservableObject {
 
     // MARK: The AI's instructions and memory
 
+    /// PC commands the phone chooses itself (the PC then doesn't need its own AI): the names and arguments Dave on the PC uses.
+    private var pcControlTool: [String: Any] {
+        let bool: [String: Any] = ["type": "boolean"]
+        return [
+            "type": "function",
+            "function": [
+                "name": "pc_control",
+                "description": "Control the user's Windows PC directly (fast): its music like the media keys, its volume (the whole PC or one app), "
+                    + "shuffle or repeat, locking it, opening or closing a program, opening a website, quiet mode. "
+                    + "For anything else on the PC (questions, its screen, files, reminders, notifications), use pc.",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "command": ["type": "string", "enum": ["media_control", "set_volume", "music_settings", "lock_pc", "open_app", "close_app", "open_website", "quiet_mode"]],
+                        "action": ["type": "string", "enum": ["play", "pause", "next", "previous"], "description": "media_control"],
+                        "app": ["type": "string", "description": "set_volume: one app, e.g. 'Discord'; empty for the whole PC"],
+                        "change": ["type": "string", "enum": ["up", "down"], "description": "set_volume: louder or quieter"],
+                        "level": ["type": "integer", "description": "set_volume: 0-100"],
+                        "mute": bool,
+                        "name": ["type": "string", "description": "open_app / close_app: the program, e.g. 'Roblox'"],
+                        "url": ["type": "string", "description": "open_website: the address"],
+                        "search": ["type": "string", "description": "open_website: search words"],
+                        "on": bool,
+                        "minutes": ["type": "integer", "description": "quiet_mode: how long; 0 = until turned off"],
+                        "shuffle": bool,
+                        "repeat": ["type": "string", "enum": ["track", "context", "off"]],
+                    ],
+                    "required": ["command"],
+                ] as [String: Any],
+            ] as [String: Any],
+        ]
+    }
+
     private var pcTool: [String: Any] {
         [
             "type": "function",
@@ -291,8 +339,9 @@ final class Brain: ObservableObject {
         prompt += "\nOn this iPhone you can open apps (and search in them), run the user's Shortcuts, work with what they copied, look at their photos, "
             + "and read a file they pick. Use the matching command instead of saying you can't."
         if settings.hasPC {
-            prompt += "\nYou also run on the user's Windows PC. For anything that has to happen on or be known from that PC "
-                + "(\"on my PC\", \"on my computer\", its music, screen or files), use the pc tool; apps and photos without \"PC\" mean this iPhone."
+            prompt += "\nYou also run on the user's Windows PC. For things on that PC (\"on my PC\", \"on my computer\"): pc_control for its music buttons, "
+                + "volume, locking it, opening or closing programs and websites; the pc tool for everything else there (questions, its screen, files, reminders). "
+                + "Apps and photos without \"PC\" mean this iPhone. Music without \"PC\": the music command."
         }
         if !settings.memories.isEmpty {
             prompt += "\nThings the user asked you to remember:\n" + settings.memories.map { "- " + $0 }.joined(separator: "\n")

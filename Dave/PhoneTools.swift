@@ -1,3 +1,4 @@
+import MediaPlayer
 import PDFKit
 import Photos
 import UIKit
@@ -8,6 +9,14 @@ import UIKit
 enum PhoneTools {
     static var definitions: [[String: Any]] {
         [
+            tool("music", "Music, like pressing the buttons: play, pause, next or previous song, what's playing, play something "
+                 + "('play lofi', 'play Drake', 'play my Chill playlist'), Spotify's volume. Spotify plays on whatever device it's on "
+                 + "(this iPhone, the PC, a speaker). Use this, not open_app, for playing and pausing.",
+                 ["action": ["type": "string", "enum": ["play", "pause", "next", "previous", "now_playing", "play_something", "volume"]],
+                  "query": str("play_something: what to play"),
+                  "kind": ["type": "string", "enum": ["any", "track", "artist", "playlist", "album"]],
+                  "level": ["type": "integer", "description": "volume: 0-100"]],
+                 required: ["action"]),
             tool("open_app", "Open an app on the iPhone, optionally searching in it: 'open Spotify', 'search lofi in Spotify', "
                  + "'directions to Utrecht', 'open youtube.com'. Also websites.",
                  ["app": str("The app's name, e.g. 'Spotify', 'WhatsApp', 'Maps'"),
@@ -116,6 +125,40 @@ enum PhoneTools {
         let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? name
         if let url = URL(string: "shortcuts://run-shortcut?name=\(encoded)"), await UIApplication.shared.open(url) { return "" }
         return settings.say("The Shortcuts app didn't open.", "De Opdrachten-app ging niet open.")
+    }
+
+    // MARK: Music
+
+    /// Spotify through the user's account when logged in; otherwise Apple Music, the only app iOS lets others control.
+    @MainActor
+    static func music(_ args: [String: Any], settings: Settings) async throws -> String {
+        let action = args["action"] as? String ?? "play"
+        if Spotify.isConnected {
+            switch action {
+            case "now_playing":
+                return try await Spotify.nowPlaying(settings: settings).map { settings.say("Now playing: ", "Nu speelt: ") + $0 }
+                    ?? settings.say("Nothing is playing on Spotify.", "Er speelt niets op Spotify.")
+            case "play_something":
+                return try await Spotify.play(args["query"] as? String ?? "", kind: args["kind"] as? String ?? "any", settings: settings)
+            case "volume":
+                return try await Spotify.setVolume(args["level"] as? Int ?? 50, settings: settings)
+            default:
+                return try await Spotify.control(action, settings: settings)
+            }
+        }
+        let player = MPMusicPlayerController.systemMusicPlayer
+        switch action {
+        case "pause": player.pause(); return "⏸ " + settings.say("Paused", "Gepauzeerd")
+        case "next": player.skipToNextItem(); return "⏭ " + settings.say("Next song", "Volgende nummer")
+        case "previous": player.skipToPreviousItem(); return "⏮ " + settings.say("Previous song", "Vorige nummer")
+        case "play": player.play(); return "▶ " + settings.say("Playing", "Speelt af")
+        case "now_playing":
+            if let item = player.nowPlayingItem { return settings.say("Now playing: ", "Nu speelt: ") + "\(item.title ?? "") – \(item.artist ?? "")" }
+            return settings.say("Nothing is playing in Apple Music.", "Er speelt niets in Apple Music.")
+        default:
+            return settings.say("For that, log me in to Spotify in the settings. Without it I can only play, pause and skip Apple Music.",
+                                "Daarvoor moet je me inloggen bij Spotify in de instellingen. Zonder kan ik alleen Apple Music afspelen, pauzeren en overslaan.")
+        }
     }
 
     // MARK: Clipboard
