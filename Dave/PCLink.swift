@@ -50,15 +50,22 @@ enum PCLink {
         return try await post("/pair", body: [:], settings: settings, timeout: 10)
     }
 
-    /// Does Dave on the PC answer (within a few seconds)?
+    /// Does Dave on the PC answer (within a few seconds)? Tried twice: after the phone was idle, the first message to the
+    /// PC can take a few seconds to find its way (seen with mesh Wi-Fi), the second one is then quick.
     private static func hello(settings: Settings) async throws {
-        var request = URLRequest(url: try url("/hello", settings: settings), timeoutInterval: 5)
+        var request = URLRequest(url: try url("/hello", settings: settings), timeoutInterval: 4)
         request.httpMethod = "GET"
-        do {
-            let (_, response) = try await URLSession.shared.data(for: request)
-            guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw Failure(message: notDave(settings)) }
-        } catch let error as Failure { throw error }
-        catch { throw explain(error, settings: settings) }
+        for attempt in 0..<2 {
+            do {
+                let (_, response) = try await URLSession.shared.data(for: request)
+                guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw Failure(message: notDave(settings)) }
+                return
+            } catch let error as Failure { throw error }
+            catch {
+                if error is CancellationError || (error as? URLError)?.code == .cancelled { throw CancellationError() }
+                if attempt == 1 || (error as? URLError)?.code != .timedOut { throw explain(error, settings: settings) }
+            }
+        }
     }
 
     private static func url(_ path: String, settings: Settings) throws -> URL {
