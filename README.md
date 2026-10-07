@@ -11,6 +11,7 @@ Dave, the voice assistant, as an iPhone app. Tap the orb and talk (English or Du
 - **Clipboard:** "what did I copy?", "translate what I copied", "what's in the picture I copied?"
 - **Photos:** "what's in my last screenshot?", "how many photos did I take yesterday?", "show my favourites from last week"
 - **Files:** "read this file", "summarise a PDF" (you pick the file)
+- **Tabs like Dave's window on the PC:** your reminders, memories, music and screen time (with Dave on your PC)
 - **Themes:** the same 7 as on the PC (Aurora, Ember, Toxic, Ocean, Sakura, Midnight, Legacy), in the settings
 
 iOS only lets apps open other apps through links (most well-known apps have one), and only lets them see files you pick.
