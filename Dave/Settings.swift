@@ -11,8 +11,10 @@ final class Settings: ObservableObject {
     @Published var language: String { didSet { defaults.set(language, forKey: "language") } }
     @Published var country: String { didSet { defaults.set(country, forKey: "country") } }
     /// The PC's address on the network (e.g. 192.168.1.20) and the code from Dave's settings on the PC.
-    @Published var pcAddress: String { didSet { defaults.set(pcAddress, forKey: "pcAddress") } }
-    @Published var pcCode: String { didSet { defaults.set(pcCode, forKey: "pcCode") } }
+    @Published var pcAddress: String { didSet { defaults.set(pcAddress, forKey: "pcAddress"); if pcAddress != oldValue { pcLinked = false } } }
+    @Published var pcCode: String { didSet { defaults.set(pcCode, forKey: "pcCode"); if pcCode != oldValue { pcLinked = false } } }
+    /// The PC answered the last time it was tried (connecting or a question): only then it says "linked".
+    @Published var pcLinked: Bool { didSet { defaults.set(pcLinked, forKey: "pcLinked") } }
     /// Things the user asked Dave to remember (copied from the PC when connecting).
     @Published var memories: [String] { didSet { defaults.set(memories, forKey: "memories") } }
     /// 0.4 (slow) … 0.6 (fast); 0.5 is iOS' normal speed.
@@ -25,6 +27,7 @@ final class Settings: ObservableObject {
         country = defaults.string(forKey: "country") ?? "the Netherlands"
         pcAddress = defaults.string(forKey: "pcAddress") ?? ""
         pcCode = defaults.string(forKey: "pcCode") ?? ""
+        pcLinked = defaults.bool(forKey: "pcLinked")
         memories = defaults.stringArray(forKey: "memories") ?? []
         speechRate = defaults.object(forKey: "speechRate") as? Double ?? 0.5
     }
