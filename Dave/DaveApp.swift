@@ -10,11 +10,11 @@ struct DaveApp: App {
     }
 }
 
-/// Dave's Aurora colours, the same as on the PC.
+/// Dave's colours, from the chosen theme (Aurora's names: purple, violet, pink, cyan, deep).
 extension Color {
-    static let davePurple = Color(red: 0x96 / 255, green: 0x46 / 255, blue: 0xFF / 255)
-    static let daveViolet = Color(red: 0x6E / 255, green: 0x5A / 255, blue: 0xFF / 255)
-    static let davePink = Color(red: 0xDC / 255, green: 0x50 / 255, blue: 0xE6 / 255)
-    static let daveCyan = Color(red: 0x00 / 255, green: 0xD2 / 255, blue: 0xFF / 255)
-    static let daveDeep = Color(red: 0x10 / 255, green: 0x0A / 255, blue: 0x26 / 255)
+    static var davePurple: Color { Theme.current.main }
+    static var daveViolet: Color { Theme.current.middle }
+    static var davePink: Color { Theme.current.accent }
+    static var daveCyan: Color { Theme.current.bright }
+    static var daveDeep: Color { Theme.current.deep }
 }

@@ -66,6 +66,31 @@ struct SettingsView: View {
                                       "Eenmalig: op developer.spotify.com/dashboard → je app → Settings → Redirect URIs, voeg \(Spotify.redirectUri) toe en sla op. De Client ID komt van je pc als je koppelt."))
                 }
 
+                Section {
+                    ForEach(Theme.all) { theme in
+                        Button { settings.theme = theme.id } label: {
+                            HStack(spacing: 12) {
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 10).fill(theme.deep)
+                                    Circle().fill(theme.legacy
+                                                  ? AnyShapeStyle(LinearGradient(colors: [theme.main, theme.accent], startPoint: .topLeading, endPoint: .bottomTrailing))
+                                                  : AnyShapeStyle(AngularGradient(colors: [theme.main, theme.accent, theme.bright, theme.middle, theme.main], center: .center)))
+                                        .padding(7)
+                                }
+                                .frame(width: 44, height: 44)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(theme.name).foregroundStyle(.primary)
+                                    Text(theme.description).font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if settings.theme == theme.id { Image(systemName: "checkmark").foregroundStyle(theme.bright) }
+                            }
+                        }
+                    }
+                } header: {
+                    Text(settings.say("Theme", "Thema"))
+                }
+
                 Section(settings.say("You", "Jij")) {
                     TextField("Dave", text: $settings.name)
                     Picker(settings.say("Language", "Taal"), selection: $settings.language) {
