@@ -3,6 +3,9 @@ import UniformTypeIdentifiers
 
 struct ContentView: View {
     @StateObject private var brain = Brain()
+    @StateObject private var updater = Updater()
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var updateStatus = ""
     @ObservedObject private var settings = Settings.shared
     @State private var typed = ""
     @State private var showSettings = false
@@ -13,6 +16,7 @@ struct ContentView: View {
             AuroraBackground()
             VStack(spacing: 0) {
                 header
+                if let release = updater.available { updateNotice(release) }
                 chat
                 controls
             }
@@ -27,6 +31,8 @@ struct ContentView: View {
             if !picking { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { brain.filePicked(nil) } }
         }
         .onAppear { if settings.groqKey.isEmpty { showSettings = true } }
+        .task { await updater.check() }
+        .onChange(of: scenePhase) { phase in if phase == .active { Task { await updater.check() } } }
     }
 
     private var header: some View {
@@ -43,6 +49,42 @@ struct ContentView: View {
             }
         }
         .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 6)
+    }
+
+    /// "A new Dave is out": the new Dave.ipa is installed from the PC, so the page can be opened there.
+    private func updateNotice(_ release: Updater.Release) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(settings.say("✨ Dave \(release.version) is out", "✨ Dave \(release.version) is uit")).font(.headline)
+            Text(settings.say("Download Dave.ipa on your PC and install it with Sideloadly, like before. Your settings stay.",
+                              "Download Dave.ipa op je pc en installeer hem met Sideloadly, zoals eerder. Je instellingen blijven."))
+                .font(.subheadline).foregroundStyle(.white.opacity(0.75))
+            HStack(spacing: 10) {
+                if settings.hasPC {
+                    Button(settings.say("Open on my PC", "Open op mijn pc")) {
+                        Task {
+                            do {
+                                _ = try await PCLink.command("open_website", args: ["url": release.page.absoluteString], settings: settings)
+                                updateStatus = settings.say("✅ Opened on your PC.", "✅ Geopend op je pc.")
+                            } catch {
+                                updateStatus = "⚠️ " + error.localizedDescription
+                            }
+                        }
+                    }
+                    .buttonStyle(.borderedProminent).tint(.davePurple)
+                } else {
+                    Link(settings.say("Show page", "Toon pagina"), destination: release.page)
+                        .buttonStyle(.borderedProminent).tint(.davePurple)
+                }
+                Button(settings.say("Later", "Later")) { updateStatus = ""; updater.later() }
+                    .buttonStyle(.bordered).tint(.white)
+            }
+            if !updateStatus.isEmpty { Text(updateStatus).font(.caption).foregroundStyle(.white.opacity(0.7)) }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Color.davePurple.opacity(0.5)))
+        .padding(.horizontal, 16).padding(.bottom, 6)
     }
 
     private var status: String {
