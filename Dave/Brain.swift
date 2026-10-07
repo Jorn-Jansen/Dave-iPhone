@@ -257,14 +257,16 @@ final class Brain: ObservableObject {
                                  "Ik mag je foto's niet zien. Zet het aan in de iOS-instellingen → Dave → Foto's."), [])
         }
         let terms = content.split(separator: ",").map { String($0) }
-        let matches = await PhotoIndex.shared.search(terms) { [weak self] done, total in
+        let (matches, notOnPhone) = await PhotoIndex.shared.search(terms) { [weak self] done, total in
             Task { @MainActor in self?.progress = "📷 \(done)/\(total)" }
         }
         progress = nil
         if Task.isCancelled { throw CancellationError() }
         let what = terms.first?.trimmingCharacters(in: .whitespaces) ?? content
+        let cloud = notOnPhone == 0 ? "" : settings.say(" \(notOnPhone) photos are only in iCloud, so I couldn't look at those.",
+                                                         " \(notOnPhone) foto's staan alleen in iCloud, die kon ik niet bekijken.")
         guard !matches.isEmpty else {
-            return (settings.say("I didn't find any photos with \(what).", "Ik vond geen foto's met \(what)."), [])
+            return (settings.say("I didn't find any photos with \(what).", "Ik vond geen foto's met \(what).") + cloud, [])
         }
         let shown = await PhoneTools.images(of: matches.prefix(look ? 4 : 8).map(\.asset), size: look ? 1600 : 400)
         if look {
@@ -273,7 +275,7 @@ final class Brain: ObservableObject {
         }
         let newest = matches[0].asset.creationDate.map(when) ?? "?"
         return (settings.say("I found \(matches.count) \(matches.count == 1 ? "photo" : "photos") with \(what); the newest is from \(newest).",
-                             "Ik vond \(matches.count) \(matches.count == 1 ? "foto" : "foto's") met \(what); de nieuwste is van \(newest)."), shown)
+                             "Ik vond \(matches.count) \(matches.count == 1 ? "foto" : "foto's") met \(what); de nieuwste is van \(newest).") + cloud, shown)
     }
 
     /// "today at 14:05", "yesterday at 9:12", "3 October"

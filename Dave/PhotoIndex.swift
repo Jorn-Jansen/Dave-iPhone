@@ -20,7 +20,8 @@ actor PhotoIndex {
 
     /// Photos showing one of [terms] ("dog", "puppy"), best and newest first. [progress] reports (done, total) while
     /// photos that weren't looked at before are being looked at.
-    func search(_ terms: [String], progress: @escaping @Sendable (Int, Int) -> Void) async -> [Match] {
+    /// Also returns how many photos aren't on the iPhone itself (only in iCloud), so they couldn't be looked at.
+    func search(_ terms: [String], progress: @escaping @Sendable (Int, Int) -> Void) async -> (matches: [Match], notOnPhone: Int) {
         load()
         let options = PHFetchOptions()
         options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
@@ -31,7 +32,7 @@ actor PhotoIndex {
 
         // Look at the photos that are new since last time
         let missing = assets.filter { labels[$0.localIdentifier] == nil }
-        var done = 0
+        var done = 0, notOnPhone = 0
         if !missing.isEmpty { progress(0, missing.count) } // shows right away that the photos are being looked at
         for chunk in stride(from: 0, to: missing.count, by: 6).map({ Array(missing[$0..<min($0 + 6, missing.count)]) }) {
             if Task.isCancelled { break }
@@ -41,7 +42,9 @@ actor PhotoIndex {
                 for await result in group { results.append(result) }
                 return results
             }
-            for (id, things) in found where things != Self.skipped { labels[id] = things } // skipped: tried again next time
+            for (id, things) in found {
+                if things == Self.skipped { notOnPhone += 1 } else { labels[id] = things } // skipped: tried again next time
+            }
             done += chunk.count
             progress(done, missing.count)
             if done % 200 < 6 { save() }
@@ -57,53 +60,39 @@ actor PhotoIndex {
                 .values.max() ?? 0
             if best >= 0.35 { matches.append(Match(asset: asset, sureness: best)) }
         }
-        return matches // already newest first
+        return (matches, notOnPhone) // already newest first
     }
 
     /// What's in one photo: Apple's image recognition on a small version of it.
-    /// A photo that couldn't be had in time (still in iCloud): not remembered, so it's tried again next time.
+    /// A photo that isn't on the iPhone itself (only in iCloud): not remembered, so it's tried again next time.
     private static let skipped: [String: Float] = ["_skipped": 1]
 
+    /// What's in one photo: a small version of it (only as stored on the iPhone: no waiting for iCloud), then Apple's
+    /// image recognition. Done the plain way, on its own background thread, with photo requests that answer right away.
     private static func recognise(_ asset: PHAsset) async -> [String: Float] {
-        guard let image = await thumbnail(asset), let cgImage = image.cgImage else { return skipped }
-        let request = VNClassifyImageRequest()
-        do {
-            try VNImageRequestHandler(cgImage: cgImage, options: [:]).perform([request])
-        } catch { return [:] }
-        var things: [String: Float] = [:]
-        for observation in request.results ?? [] where observation.confidence >= 0.2 {
-            things[observation.identifier] = observation.confidence
-        }
-        return things
-    }
-
-    /// A small version of the photo. Photos that are only in iCloud get downloaded, but iOS can keep you waiting a long
-    /// time for those: after 8 seconds it's skipped (looked at again on the next search), so one photo can't hold up the rest.
-    private static func thumbnail(_ asset: PHAsset) async -> UIImage? {
-        let request = Request()
-        return await withTaskGroup(of: UIImage?.self) { group in
-            group.addTask {
-                await withCheckedContinuation { done in
-                    let options = PHImageRequestOptions()
-                    options.deliveryMode = .highQualityFormat // one answer, not a blurry one first
-                    options.resizeMode = .fast
-                    options.isNetworkAccessAllowed = true // photos that are only in iCloud
-                    request.id = PHImageManager.default().requestImage(for: asset, targetSize: CGSize(width: 360, height: 360),
-                                                                       contentMode: .aspectFit, options: options) { image, _ in done.resume(returning: image) }
+        await withCheckedContinuation { done in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let options = PHImageRequestOptions()
+                options.isSynchronous = true // answers here and now (fine off the main thread)
+                options.deliveryMode = .highQualityFormat
+                options.resizeMode = .fast
+                options.isNetworkAccessAllowed = false
+                var image: UIImage?
+                PHImageManager.default().requestImage(for: asset, targetSize: CGSize(width: 360, height: 360), contentMode: .aspectFit,
+                                                      options: options) { result, _ in image = result }
+                guard let cgImage = image?.cgImage else { done.resume(returning: skipped); return }
+                let request = VNClassifyImageRequest()
+                do { try VNImageRequestHandler(cgImage: cgImage, options: [:]).perform([request]) }
+                catch { done.resume(returning: [:]); return }
+                var things: [String: Float] = [:]
+                for observation in request.results ?? [] where observation.confidence >= 0.2 {
+                    things[observation.identifier] = observation.confidence
                 }
+                done.resume(returning: things)
             }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: 8_000_000_000)
-                return nil
-            }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            if first == nil { PHImageManager.default().cancelImageRequest(request.id) } // its handler then answers (nil), ending the wait
-            return first
         }
     }
 
-    private final class Request: @unchecked Sendable { var id: PHImageRequestID = 0 }
 
     private func load() {
         guard !loaded else { return }
