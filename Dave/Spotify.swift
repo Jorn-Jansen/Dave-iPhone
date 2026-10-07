@@ -112,6 +112,12 @@ enum Spotify {
         let (data, response) = try await URLSession.shared.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         let json = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+        if status == 429 {
+            // Spotify limits how often one Spotify app may ask (the PC Dave uses the same one)
+            let wait = Int((response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Retry-After") ?? "") ?? 30
+            throw Failure(message: settings.say("Spotify says it's had too many requests. Try again in about \(max(wait, 5)) seconds.",
+                                                "Spotify zegt dat het te veel verzoeken kreeg. Probeer het over zo'n \(max(wait, 5)) seconden opnieuw."))
+        }
         if status == 403, ((json["error"] as? [String: Any])?["reason"] as? String) == "PREMIUM_REQUIRED" {
             throw Failure(message: settings.say("Spotify only lets apps control playback with Premium.", "Spotify laat apps alleen afspelen bedienen met Premium."))
         }
