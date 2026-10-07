@@ -1,0 +1,40 @@
+# Builds Dave.ipa on a Mac (iPhone apps can only be built on one). The .ipa isn't signed:
+# Sideloadly or AltStore signs it with your own Apple ID when you install it.
+name: Build Dave.ipa
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make the Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Build
+        run: |
+          xcodebuild -project Dave.xcodeproj -target Dave -configuration Release -sdk iphoneos \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build | tee build.log | grep -E "error:|warning: .*deprecated|BUILD" || true
+          test -d build/Release-iphoneos/Dave.app
+
+      - name: Show the end of the build log
+        if: failure()
+        run: tail -80 build.log
+
+      - name: Pack Dave.ipa
+        run: |
+          mkdir Payload
+          cp -R build/Release-iphoneos/Dave.app Payload/
+          zip -qry Dave.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Dave-ipa
+          path: Dave.ipa
