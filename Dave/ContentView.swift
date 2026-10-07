@@ -17,6 +17,7 @@ struct ContentView: View {
                 controls
             }
         }
+        .id(settings.theme) // another theme: draw everything again in its colours
         .sheet(isPresented: $showSettings) { SettingsView() }
         .fileImporter(isPresented: $brain.pickingFile, allowedContentTypes: [.item]) { result in
             brain.filePicked(try? result.get())
@@ -166,6 +167,26 @@ struct Orb: View {
     let level: Float
 
     var body: some View {
+        if Theme.current.legacy { legacy } else { orb }
+    }
+
+    /// The original look: a bright gradient button with a microphone, that grows with your voice.
+    private var legacy: some View {
+        TimelineView(.animation) { timeline in
+            let t = timeline.date.timeIntervalSinceReferenceDate
+            let pulse = state == .listening ? 1 + CGFloat(level) * 0.2 : state == .thinking ? 1 + 0.05 * CGFloat(sin(t * 6)) : 1
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(colors: [.davePurple, .davePink], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .shadow(color: .davePurple.opacity(0.6), radius: 14)
+                Image(systemName: state == .listening ? "waveform" : state == .speaking ? "speaker.wave.2.fill" : "mic.fill")
+                    .font(.title.bold()).foregroundStyle(.white)
+            }
+            .scaleEffect(pulse)
+        }
+    }
+
+    private var orb: some View {
         TimelineView(.animation) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
             let speed: Double = state == .thinking ? 2.2 : state == .speaking ? 1.4 : 0.5
@@ -195,6 +216,15 @@ struct Orb: View {
 /// Slowly drifting northern lights behind everything.
 struct AuroraBackground: View {
     var body: some View {
+        if Theme.current.legacy {
+            // The original look: calm, no northern lights
+            LinearGradient(colors: [.daveDeep, .black], startPoint: .top, endPoint: .bottom).ignoresSafeArea()
+        } else {
+            lights
+        }
+    }
+
+    private var lights: some View {
         TimelineView(.animation(minimumInterval: 1 / 30)) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate / 8
             GeometryReader { geo in

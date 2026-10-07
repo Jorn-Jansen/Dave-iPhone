@@ -22,6 +22,8 @@ final class Settings: ObservableObject {
     @Published var spotifyRefreshToken: String { didSet { defaults.set(spotifyRefreshToken, forKey: "spotifyRefreshToken") } }
     var spotifyAccessToken: String { didSet { defaults.set(spotifyAccessToken, forKey: "spotifyAccessToken") } }
     var spotifyTokenExpires: Double { didSet { defaults.set(spotifyTokenExpires, forKey: "spotifyTokenExpires") } }
+    /// The colour theme (see Theme.all), like on the PC.
+    @Published var theme: String { didSet { defaults.set(theme, forKey: "theme") } }
     /// 0.4 (slow) … 0.6 (fast); 0.5 is iOS' normal speed.
     @Published var speechRate: Double { didSet { defaults.set(speechRate, forKey: "speechRate") } }
 
@@ -34,6 +36,7 @@ final class Settings: ObservableObject {
         pcCode = defaults.string(forKey: "pcCode") ?? ""
         pcLinked = defaults.bool(forKey: "pcLinked")
         memories = defaults.stringArray(forKey: "memories") ?? []
+        theme = defaults.string(forKey: "theme") ?? "aurora"
         spotifyClientId = defaults.string(forKey: "spotifyClientId") ?? ""
         spotifyRefreshToken = defaults.string(forKey: "spotifyRefreshToken") ?? ""
         spotifyAccessToken = defaults.string(forKey: "spotifyAccessToken") ?? ""
