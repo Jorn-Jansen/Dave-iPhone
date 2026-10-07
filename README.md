@@ -3,6 +3,9 @@
 Dave, the voice assistant, as an iPhone app. Tap the orb and talk (English or Dutch), or type. He answers out loud, searches the web for anything current, and can hand things to [Dave on your Windows PC](https://github.com/Jorn-Jansen/Dave-Windows): "pause the music on my PC", "lock my PC", "what did I miss on Discord?".
 
 ## What he can do on the iPhone
+- **Music:** "play the music", "pause", "next song", "what's playing?", "play lofi", "play my Chill playlist": Spotify
+  (Premium) on whichever device it plays on, or Apple Music when you're not logged in to Spotify
+- **Your PC:** "pause the music on my PC", "PC volume to 20", "lock my PC", "open Roblox on my PC", "what's on my PC screen?"
 - **Apps:** "open Spotify", "search lofi in Spotify", "directions to Utrecht", "open reddit.com"
 - **Shortcuts:** "run my shortcut Goodnight" (a Siri Shortcut can open any app or change settings)
 - **Clipboard:** "what did I copy?", "translate what I copied", "what's in the picture I copied?"
@@ -23,6 +26,11 @@ Dave isn't in the App Store, so you sideload him with your own Apple ID:
    This also copies your Groq key, name and language, so you don't have to type them.
 
 The phone and PC need to be on the same Wi-Fi. To use it outside your home, install [Tailscale](https://tailscale.com) on both and use the PC's Tailscale address (100.x.x.x).
+
+## Spotify
+1. On [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard) → your Spotify app (the one Dave on the PC uses) →
+   **Settings → Edit → Redirect URIs**: add `dave-iphone://spotify-callback` and save.
+2. In the app: settings (⚙) → **Log in to Spotify**. (Connecting to your PC fills in the Client ID.)
 
 Without a PC, paste your own free Groq key from [console.groq.com/keys](https://console.groq.com/keys) in the settings.
 
