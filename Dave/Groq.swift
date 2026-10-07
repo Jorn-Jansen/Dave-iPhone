@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// The AI (chat, with web search) and speech recognition (Whisper), on Groq's free tier, like Dave on the PC.
 enum Groq {
@@ -15,19 +16,20 @@ enum Groq {
     }
 
     /// Send a chat; returns the first choice's message. Web search is added when the account allows it.
-    static func chat(messages: [[String: Any]], tools: [[String: Any]], settings: Settings) async throws -> [String: Any] {
+    static func chat(messages: [[String: Any]], tools: [[String: Any]], settings: Settings, search: Bool = true, model chosenModel: String? = nil) async throws -> [String: Any] {
         guard !settings.groqKey.isEmpty else {
             throw Failure(message: settings.say("I need a Groq key first: connect to your PC in the settings, or paste a key there.",
                                                 "Ik heb eerst een Groq-sleutel nodig: koppel je pc in de instellingen, of plak daar een sleutel."))
         }
         var allTools = tools
-        if searchAvailable { allTools.append(["type": "browser_search"]) }
+        if searchAvailable && search { allTools.append(["type": "browser_search"]) }
+        var hideThinking = true // (some picture models don't know this option: then without)
         for attempt in 0..<3 {
             var body: [String: Any] = [
-                "model": Date() < useFallbackUntil ? fallbackModel : model,
-                "reasoning_effort": "low",
+                "model": chosenModel ?? (Date() < useFallbackUntil ? fallbackModel : model),
                 "messages": messages,
             ]
+            if chosenModel == nil { body["reasoning_effort"] = "low" } else if hideThinking { body["reasoning_format"] = "hidden" }
             if !allTools.isEmpty { body["tools"] = allTools }
             let (status, data) = try await send("/chat/completions", json: body, settings: settings)
             let text = String(data: data, encoding: .utf8) ?? ""
@@ -36,6 +38,10 @@ enum Groq {
                let choices = json["choices"] as? [[String: Any]],
                let message = choices.first?["message"] as? [String: Any] {
                 return message
+            }
+            if status == 400 && hideThinking && text.contains("reasoning_format") {
+                hideThinking = false
+                continue
             }
             if (status == 400 || status == 403) && searchAvailable && text.contains("browser_search") {
                 searchAvailable = false // web search isn't allowed on this account: carry on without it
@@ -55,6 +61,49 @@ enum Groq {
             throw failure(status: status, text: text, settings: settings)
         }
         throw failure(status: 429, text: "", settings: settings)
+    }
+
+    /// The model that can look at pictures (the same as Dave on the PC uses).
+    static let visionModel = "qwen/qwen3.8-27b"
+
+    /// Answer [question] about pictures (a photo, a screenshot, what was copied), as a short spoken answer.
+    static func look(at images: [UIImage], question: String, what: String, language: String, settings: Settings) async throws -> String {
+        let languageName = language.hasPrefix("nl") ? "Dutch" : "English"
+        let system = """
+        You are \(settings.displayName), a voice assistant. The image(s) are \(what). You CAN see them: they are attached to the message.
+        Answer the user's question about them in \(languageName), in one to three short spoken sentences (more only if they ask to read something out).
+        Plain speech only: no markdown, lists, emojis or symbols.
+        """
+        var content: [[String: Any]] = [["type": "text", "text": question]]
+        for image in images.prefix(4) {
+            guard let jpeg = scaled(image, maxSide: 1600).jpegData(compressionQuality: 0.7) else { continue }
+            content.append(["type": "image_url", "image_url": ["url": "data:image/jpeg;base64," + jpeg.base64EncodedString()]])
+        }
+        let message = try await chat(messages: [["role": "system", "content": system], ["role": "user", "content": content]],
+                                     tools: [], settings: settings, search: false, model: visionModel)
+        let answer = (message["content"] as? String ?? "").replacingOccurrences(of: #"<think>[\s\S]*?</think>"#, with: "", options: .regularExpression)
+        return answer.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Do [task] with [material] (what was copied, a file), as a short spoken answer.
+    static func work(on material: String, task: String, what: String, language: String, settings: Settings) async throws -> String {
+        let languageName = language.hasPrefix("nl") ? "Dutch" : "English"
+        let system = "You are \(settings.displayName), a voice assistant on the user's iPhone. Below is \(what). Do what the user asks with it. "
+            + "Answer in \(languageName), as speech: one to three short sentences (more only if they ask to read it out or explain it in detail). "
+            + "When asked to read text out, read it as it is if it's short, otherwise summarise it. Plain speech only: no markdown, lists, emojis or symbols."
+        let message = try await chat(messages: [["role": "system", "content": system], ["role": "user", "content": "\(task)\n\n---\n\(material)"]],
+                                     tools: [], settings: settings, search: false)
+        return (message["content"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func scaled(_ image: UIImage, maxSide: CGFloat) -> UIImage {
+        let side = max(image.size.width, image.size.height)
+        guard side > maxSide else { return image }
+        let factor = maxSide / side
+        let size = CGSize(width: image.size.width * factor, height: image.size.height * factor)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: size, format: format).image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
     }
 
     /// What was said in the recording (an .m4a), and the language Whisper heard ("dutch", "english", …).

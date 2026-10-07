@@ -34,6 +34,7 @@ targets:
         UIUserInterfaceStyle: Dark
         NSMicrophoneUsageDescription: Dave listens to you when you tap the microphone.
         NSLocalNetworkUsageDescription: Dave talks to Dave on your PC.
+        NSPhotoLibraryUsageDescription: Dave looks at your photos when you ask him to (like "what's in my last screenshot?").
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
           NSAllowsLocalNetworking: true
