@@ -5,6 +5,16 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var pairing = false
     @State private var pairStatus = ""
+    @State private var spotifyStatus = ""
+
+    private func spotifyLogIn() async {
+        do {
+            try await Spotify.logIn(settings: settings)
+            spotifyStatus = ""
+        } catch {
+            spotifyStatus = "⚠️ " + error.localizedDescription
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -36,6 +46,24 @@ struct SettingsView: View {
                     Text(settings.say("Groq key", "Groq-sleutel"))
                 } footer: {
                     Text(settings.say("Free at console.groq.com/keys. Filled in by connecting to your PC.", "Gratis op console.groq.com/keys. Wordt ingevuld door te koppelen."))
+                }
+
+                Section {
+                    if Spotify.isConnected {
+                        Label(settings.say("Logged in: Dave controls your Spotify", "Ingelogd: Dave bedient je Spotify"), systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                        Button(settings.say("Log out of Spotify", "Uitloggen bij Spotify"), role: .destructive) { Spotify.logOut(settings: settings) }
+                    } else {
+                        TextField("Client ID", text: $settings.spotifyClientId).autocorrectionDisabled().textInputAutocapitalization(.never)
+                        Button(settings.say("Log in to Spotify", "Inloggen bij Spotify")) { Task { await spotifyLogIn() } }
+                            .disabled(settings.spotifyClientId.isEmpty)
+                    }
+                    if !spotifyStatus.isEmpty { Text(spotifyStatus).font(.footnote).foregroundStyle(.secondary) }
+                } header: {
+                    Text("Spotify (Premium)")
+                } footer: {
+                    Text(settings.say("Once: on developer.spotify.com/dashboard → your app → Settings → Redirect URIs, add \(Spotify.redirectUri) and save. The Client ID comes from your PC when you connect.",
+                                      "Eenmalig: op developer.spotify.com/dashboard → je app → Settings → Redirect URIs, voeg \(Spotify.redirectUri) toe en sla op. De Client ID komt van je pc als je koppelt."))
                 }
 
                 Section(settings.say("You", "Jij")) {
@@ -84,6 +112,7 @@ struct SettingsView: View {
             if let language = config["language"] as? String { settings.language = language.hasPrefix("nl") ? "nl-NL" : "en-US" }
             if let country = config["country"] as? String, !country.isEmpty { settings.country = country }
             if let memories = config["memories"] as? [String] { settings.memories = memories }
+            if let spotify = config["spotifyClientId"] as? String, !spotify.isEmpty { settings.spotifyClientId = spotify }
             settings.pcLinked = true
             pairStatus = settings.say("✅ Connected to \(settings.displayName) on your PC.", "✅ Gekoppeld aan \(settings.displayName) op je pc.")
         } catch {

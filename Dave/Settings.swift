@@ -17,6 +17,11 @@ final class Settings: ObservableObject {
     @Published var pcLinked: Bool { didSet { defaults.set(pcLinked, forKey: "pcLinked") } }
     /// Things the user asked Dave to remember (copied from the PC when connecting).
     @Published var memories: [String] { didSet { defaults.set(memories, forKey: "memories") } }
+    /// Spotify: the Client ID of the user's Spotify developer app (copied from the PC), and the phone's own login.
+    @Published var spotifyClientId: String { didSet { defaults.set(spotifyClientId, forKey: "spotifyClientId") } }
+    @Published var spotifyRefreshToken: String { didSet { defaults.set(spotifyRefreshToken, forKey: "spotifyRefreshToken") } }
+    var spotifyAccessToken: String { didSet { defaults.set(spotifyAccessToken, forKey: "spotifyAccessToken") } }
+    var spotifyTokenExpires: Double { didSet { defaults.set(spotifyTokenExpires, forKey: "spotifyTokenExpires") } }
     /// 0.4 (slow) … 0.6 (fast); 0.5 is iOS' normal speed.
     @Published var speechRate: Double { didSet { defaults.set(speechRate, forKey: "speechRate") } }
 
@@ -29,6 +34,10 @@ final class Settings: ObservableObject {
         pcCode = defaults.string(forKey: "pcCode") ?? ""
         pcLinked = defaults.bool(forKey: "pcLinked")
         memories = defaults.stringArray(forKey: "memories") ?? []
+        spotifyClientId = defaults.string(forKey: "spotifyClientId") ?? ""
+        spotifyRefreshToken = defaults.string(forKey: "spotifyRefreshToken") ?? ""
+        spotifyAccessToken = defaults.string(forKey: "spotifyAccessToken") ?? ""
+        spotifyTokenExpires = defaults.double(forKey: "spotifyTokenExpires")
         speechRate = defaults.object(forKey: "speechRate") as? Double ?? 0.5
     }
 
