@@ -41,7 +41,10 @@ struct ContentView: View {
         case .listening: return settings.say("Listening…", "Ik luister…")
         case .thinking: return settings.say("Thinking…", "Even denken…")
         case .speaking: return settings.say("Talking", "Aan het praten")
-        case .idle: return settings.hasPC ? settings.say("💻 Linked to your PC", "💻 Gekoppeld aan je pc") : settings.say("On your iPhone", "Op je iPhone")
+        case .idle:
+            if !settings.hasPC { return settings.say("On your iPhone", "Op je iPhone") }
+            return settings.pcLinked ? settings.say("💻 Linked to your PC", "💻 Gekoppeld aan je pc")
+                                     : settings.say("⚠️ PC not reachable: see settings", "⚠️ Pc niet bereikbaar: zie instellingen")
         }
     }
 
@@ -106,7 +109,7 @@ struct ContentView: View {
         let text = typed
         typed = ""
         typing = false
-        Task { await brain.ask(text) }
+        brain.submit(text)
     }
 }
 

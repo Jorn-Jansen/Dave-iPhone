@@ -21,18 +21,31 @@ final class Brain: ObservableObject {
     private let voice = Voice()
     private var history: [[String: Any]] = [] // short-term memory, so follow-ups work; forgotten after 10 quiet minutes
     private var lastActivity = Date.distantPast
-    private var listenTask: Task<Void, Never>?
+    private var work: Task<Void, Never>? // what Dave is doing now (listening, thinking): tapping the orb can cancel it
 
     // MARK: Listening
 
-    /// The big button: listen, stop listening, or stop talking.
+    /// The big button: listen, stop listening, stop thinking, or stop talking.
     func micTapped() {
         switch state {
-        case .idle: listenTask = Task { await listen() }
+        case .idle: work = Task { await listen() }
         case .listening: stopRequested = true // the listening loop stops the recording and sends it
         case .speaking: voice.stopSpeaking()
-        case .thinking: break
+        case .thinking: work?.cancel()
         }
+    }
+
+    /// A typed question.
+    func submit(_ text: String) {
+        guard state == .idle || state == .speaking else { return }
+        voice.stopSpeaking()
+        work = Task { await ask(text) }
+    }
+
+    /// Cancelled (tapped the orb while thinking): back to waiting, without an error.
+    private func stopped() {
+        add(Line(fromUser: false, text: settings.say("⏹ Stopped.", "⏹ Gestopt.")))
+        state = .idle
     }
 
     private var stopRequested = false
@@ -73,6 +86,7 @@ final class Brain: ObservableObject {
             }
             await ask(text, language: languageTag(whisper: language))
         } catch {
+            if Task.isCancelled { stopped(); return }
             await answer(error.localizedDescription, language: settings.language)
         }
     }
@@ -96,7 +110,7 @@ final class Brain: ObservableObject {
     /// A typed or spoken question.
     func ask(_ text: String, language: String? = nil) async {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, state != .thinking else { return }
+        guard !text.isEmpty else { state = .idle; return } // (busy is checked by the callers: listen() is already "thinking" here)
         let language = language ?? settings.language
         add(Line(fromUser: true, text: text))
         state = .thinking
@@ -116,8 +130,14 @@ final class Brain: ObservableObject {
                 let request = arguments?["request"] as? String ?? text
                 let id = call["id"] as? String ?? UUID().uuidString
                 let reply: String
-                do { reply = try await PCLink.ask(request, settings: settings) }
-                catch { reply = error.localizedDescription }
+                do {
+                    reply = try await PCLink.ask(request, settings: settings)
+                    settings.pcLinked = true
+                } catch {
+                    if Task.isCancelled || error is CancellationError { stopped(); return }
+                    reply = error.localizedDescription
+                    settings.pcLinked = false
+                }
                 remember(text, toolCall: (id, request), result: reply)
                 await answer(reply, language: language, viaPC: true)
             } else {
@@ -127,6 +147,7 @@ final class Brain: ObservableObject {
                 await answer(said, language: language)
             }
         } catch {
+            if Task.isCancelled { stopped(); return }
             await answer(error.localizedDescription, language: language)
         }
     }
@@ -138,7 +159,7 @@ final class Brain: ObservableObject {
         state = .idle
         // Dave asked something back: listen for the answer without another tap
         if text.trimmingCharacters(in: .whitespaces).hasSuffix("?") && !viaPC {
-            listenTask = Task { await listen() }
+            work = Task { await listen() }
         }
     }
 

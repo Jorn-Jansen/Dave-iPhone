@@ -84,8 +84,10 @@ struct SettingsView: View {
             if let language = config["language"] as? String { settings.language = language.hasPrefix("nl") ? "nl-NL" : "en-US" }
             if let country = config["country"] as? String, !country.isEmpty { settings.country = country }
             if let memories = config["memories"] as? [String] { settings.memories = memories }
+            settings.pcLinked = true
             pairStatus = settings.say("✅ Connected to \(settings.displayName) on your PC.", "✅ Gekoppeld aan \(settings.displayName) op je pc.")
         } catch {
+            settings.pcLinked = false
             pairStatus = "⚠️ " + error.localizedDescription
         }
     }
