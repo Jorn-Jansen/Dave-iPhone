@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @StateObject private var brain = Brain()
@@ -17,6 +18,13 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $showSettings) { SettingsView() }
+        .fileImporter(isPresented: $brain.pickingFile, allowedContentTypes: [.item]) { result in
+            brain.filePicked(try? result.get())
+        }
+        .onChange(of: brain.pickingFile) { picking in
+            // Closed without picking: let Dave know (a pick arrives before this, so it isn't lost)
+            if !picking { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { brain.filePicked(nil) } }
+        }
         .onAppear { if settings.groqKey.isEmpty { showSettings = true } }
     }
 
@@ -118,6 +126,23 @@ struct Bubble: View {
     let line: Brain.Line
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            message
+            if !line.images.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(Array(line.images.enumerated()), id: \.offset) { _, image in
+                            Image(uiImage: image).resizable().scaledToFill()
+                                .frame(width: 92, height: 92)
+                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var message: some View {
         HStack {
             if line.fromUser { Spacer(minLength: 50) }
             Text((line.viaPC ? "💻 " : "") + line.text)

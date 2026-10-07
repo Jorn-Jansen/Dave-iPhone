@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// Dave on the phone: listens, thinks (Groq, with web search), talks, and hands things that belong on the PC to
 /// Dave on the PC ("pause the music on my PC", "lock my PC", "what's on my screen?").
@@ -11,6 +12,7 @@ final class Brain: ObservableObject {
         let fromUser: Bool
         let text: String
         var viaPC = false
+        var images: [UIImage] = [] // photos Dave found or looked at
     }
 
     @Published var lines: [Line] = []
@@ -123,23 +125,22 @@ final class Brain: ObservableObject {
         messages.append(["role": "user", "content": "\(context)\n\n\(text)"])
 
         do {
-            let message = try await Groq.chat(messages: messages, tools: settings.hasPC ? [pcTool] : [], settings: settings)
+            let tools = PhoneTools.definitions + (settings.hasPC ? [pcTool] : [])
+            let message = try await Groq.chat(messages: messages, tools: tools, settings: settings)
             if let calls = message["tool_calls"] as? [[String: Any]], let call = calls.first,
-               let function = call["function"] as? [String: Any], function["name"] as? String == "pc" {
-                let arguments = (function["arguments"] as? String).flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] }
-                let request = arguments?["request"] as? String ?? text
+               let function = call["function"] as? [String: Any], let name = function["name"] as? String {
+                let argumentText = function["arguments"] as? String ?? "{}"
+                let arguments = (try? JSONSerialization.jsonObject(with: Data(argumentText.utf8)) as? [String: Any]) ?? [:]
                 let id = call["id"] as? String ?? UUID().uuidString
-                let reply: String
-                do {
-                    reply = try await PCLink.ask(request, settings: settings)
-                    settings.pcLinked = true
-                } catch {
-                    if Task.isCancelled || error is CancellationError { stopped(); return }
-                    reply = error.localizedDescription
-                    settings.pcLinked = false
+                let (reply, images) = try await run(name, arguments, question: text, language: language)
+                if Task.isCancelled { stopped(); return }
+                remember(text, toolCall: (id, name, argumentText), result: reply.isEmpty ? "Done." : reply)
+                if reply.isEmpty { // an app opened: nothing to say
+                    add(Line(fromUser: false, text: "↗ " + (arguments["app"] as? String ?? arguments["name"] as? String ?? "")))
+                    state = .idle
+                } else {
+                    await answer(reply, language: language, viaPC: name == "pc", images: images)
                 }
-                remember(text, toolCall: (id, request), result: reply)
-                await answer(reply, language: language, viaPC: true)
             } else {
                 let reply = speakable(message["content"] as? String ?? "")
                 let said = reply.isEmpty ? settings.say("Sorry, I didn't get an answer for that.", "Sorry, daar kreeg ik geen antwoord op.") : reply
@@ -152,8 +153,103 @@ final class Brain: ObservableObject {
         }
     }
 
-    private func answer(_ text: String, language: String, viaPC: Bool = false) async {
-        add(Line(fromUser: false, text: text, viaPC: viaPC))
+    /// Carry out one of Dave's commands; returns what to say (empty: nothing, e.g. an app opened) and pictures to show.
+    private func run(_ name: String, _ args: [String: Any], question: String, language: String) async throws -> (String, [UIImage]) {
+        switch name {
+        case "pc":
+            do {
+                let reply = try await PCLink.ask(args["request"] as? String ?? question, settings: settings)
+                settings.pcLinked = true
+                return (reply, [])
+            } catch {
+                if Task.isCancelled || error is CancellationError { throw CancellationError() }
+                settings.pcLinked = false
+                return (error.localizedDescription, [])
+            }
+
+        case "open_app": return (await PhoneTools.openApp(args, settings: settings), [])
+        case "run_shortcut": return (await PhoneTools.runShortcut(args, settings: settings), [])
+
+        case "use_clipboard":
+            let task = args["task"] as? String ?? question
+            let copied = PhoneTools.clipboard()
+            if let image = copied.image {
+                return (try await Groq.look(at: [image], question: task, what: "a picture the user copied", language: language, settings: settings), [image])
+            }
+            if let text = copied.text {
+                return (try await Groq.work(on: text, task: task, what: "text the user copied", language: language, settings: settings), [])
+            }
+            return (settings.say("Nothing is copied right now. (If iOS asked to allow pasting: tap Allow, or set Dave to always allow it in iOS' settings.)",
+                                 "Er is nu niets gekopieerd. (Vroeg iOS om plakken toe te staan: tik Sta toe, of zet het voor Dave altijd aan in de iOS-instellingen.)"), [])
+
+        case "photos":
+            let look = (args["action"] as? String) == "look"
+            let count = max(1, min(look ? 4 : 12, args["count"] as? Int ?? (look ? 1 : 12)))
+            guard let found = await PhoneTools.findPhotos(args, count: count, size: look ? 1600 : 400) else {
+                return (settings.say("I'm not allowed to see your photos. Turn it on in iOS' settings → Dave → Photos.",
+                                     "Ik mag je foto's niet zien. Zet het aan in de iOS-instellingen → Dave → Foto's."), [])
+            }
+            if found.images.isEmpty { return (settings.say("I didn't find any photos like that.", "Ik vond geen foto's zoals dat."), []) }
+            if look {
+                let what = found.images.count == 1 ? "a photo from the user's library, taken \(when(found.dates[0]))"
+                                                   : "the user's \(found.images.count) newest matching photos, newest first"
+                return (try await Groq.look(at: found.images, question: args["question"] as? String ?? question, what: what, language: language, settings: settings),
+                        found.images)
+            }
+            let newest = when(found.dates[0])
+            return (settings.say("I found \(found.total) \(found.total == 1 ? "photo" : "photos"); the newest is from \(newest).",
+                                 "Ik vond \(found.total) \(found.total == 1 ? "foto" : "foto's"); de nieuwste is van \(newest)."), found.images)
+
+        case "read_file":
+            guard let url = await pickFile() else { return (settings.say("Okay, no file then.", "Oké, dan geen bestand."), []) }
+            let content = PhoneTools.read(url)
+            let task = args["question"] as? String ?? question
+            if let image = content.image {
+                return (try await Groq.look(at: [image], question: task, what: "the picture \(url.lastPathComponent)", language: language, settings: settings), [image])
+            }
+            if let text = content.text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return (try await Groq.work(on: text, task: task, what: "the file \(url.lastPathComponent)" + (content.cut ? " (only the first part: it's long)" : ""),
+                                            language: language, settings: settings), [])
+            }
+            return (settings.say("I can't read \(url.lastPathComponent).", "Ik kan \(url.lastPathComponent) niet lezen."), [])
+
+        default:
+            return (settings.say("I can't do that here.", "Dat kan ik hier niet."), [])
+        }
+    }
+
+    /// "today at 14:05", "yesterday at 9:12", "3 October"
+    private func when(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: settings.isDutch ? "nl_NL" : "en_GB")
+        f.dateFormat = "HH:mm"
+        if Calendar.current.isDateInToday(date) { return settings.say("today at ", "vandaag om ") + f.string(from: date) }
+        if Calendar.current.isDateInYesterday(date) { return settings.say("yesterday at ", "gisteren om ") + f.string(from: date) }
+        f.dateFormat = "d MMMM"
+        return f.string(from: date)
+    }
+
+    // MARK: Picking a file
+
+    /// Shows the file picker (ContentView watches this); the pick (or nil for cancel) comes back through filePicked.
+    @Published var pickingFile = false
+    private var pickedFile: CheckedContinuation<URL?, Never>?
+
+    private func pickFile() async -> URL? {
+        await withCheckedContinuation { done in
+            pickedFile = done
+            pickingFile = true
+        }
+    }
+
+    func filePicked(_ url: URL?) {
+        let done = pickedFile
+        pickedFile = nil
+        done?.resume(returning: url)
+    }
+
+    private func answer(_ text: String, language: String, viaPC: Bool = false, images: [UIImage] = []) async {
+        add(Line(fromUser: false, text: text, viaPC: viaPC, images: images))
         state = .speaking
         await voice.speak(text, language: language, rate: settings.speechRate)
         state = .idle
@@ -192,8 +288,11 @@ final class Brain: ObservableObject {
         The user's country: \(settings.country); use its units and currency.
         Only end with a question when you really need an answer; never add filler questions like "Anything else?".
         """
+        prompt += "\nOn this iPhone you can open apps (and search in them), run the user's Shortcuts, work with what they copied, look at their photos, "
+            + "and read a file they pick. Use the matching command instead of saying you can't."
         if settings.hasPC {
-            prompt += "\nYou also run on the user's Windows PC. For anything that has to happen on or be known from that PC, use the pc tool."
+            prompt += "\nYou also run on the user's Windows PC. For anything that has to happen on or be known from that PC "
+                + "(\"on my PC\", \"on my computer\", its music, screen or files), use the pc tool; apps and photos without \"PC\" mean this iPhone."
         }
         if !settings.memories.isEmpty {
             prompt += "\nThings the user asked you to remember:\n" + settings.memories.map { "- " + $0 }.joined(separator: "\n")
@@ -207,10 +306,9 @@ final class Brain: ObservableObject {
         trimHistory()
     }
 
-    private func remember(_ question: String, toolCall: (id: String, request: String), result: String) {
-        let arguments = (try? JSONSerialization.data(withJSONObject: ["request": toolCall.request])).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+    private func remember(_ question: String, toolCall: (id: String, name: String, arguments: String), result: String) {
         history.append(["role": "user", "content": question])
-        history.append(["role": "assistant", "tool_calls": [["id": toolCall.id, "type": "function", "function": ["name": "pc", "arguments": arguments]]]])
+        history.append(["role": "assistant", "tool_calls": [["id": toolCall.id, "type": "function", "function": ["name": toolCall.name, "arguments": toolCall.arguments]]]])
         history.append(["role": "tool", "tool_call_id": toolCall.id, "content": result])
         trimHistory()
     }
