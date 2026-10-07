@@ -1,0 +1,9 @@
+# Made by XcodeGen and Xcode (recreated on every build)
+Dave.xcodeproj/
+Dave/Info.plist
+build/
+DerivedData/
+Payload/
+
+# The built app (download it from the Actions tab or the releases instead)
+*.ipa
