@@ -90,7 +90,9 @@ struct ContentView: View {
     private var status: String {
         switch brain.state {
         case .listening: return settings.say("Listening…", "Ik luister…")
-        case .thinking: return settings.say("Thinking…", "Even denken…")
+        case .thinking:
+            if let progress = brain.progress { return settings.say("Looking through your photos… ", "Ik bekijk je foto's… ") + progress }
+            return settings.say("Thinking…", "Even denken…")
         case .speaking: return settings.say("Talking", "Aan het praten")
         case .idle:
             if !settings.hasPC { return settings.say("On your iPhone", "Op je iPhone") }

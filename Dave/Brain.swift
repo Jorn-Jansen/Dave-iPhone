@@ -1,4 +1,5 @@
 import Foundation
+import Photos
 import UIKit
 
 /// Dave on the phone: listens, thinks (Groq, with web search), talks, and hands things that belong on the PC to
@@ -197,6 +198,10 @@ final class Brain: ObservableObject {
             return (settings.say("Nothing is copied right now. (If iOS asked to allow pasting: tap Allow, or set Dave to always allow it in iOS' settings.)",
                                  "Er is nu niets gekopieerd. (Vroeg iOS om plakken toe te staan: tik Sta toe, of zet het voor Dave altijd aan in de iOS-instellingen.)"), [])
 
+        case "photos" where !((args["content"] as? String) ?? "").trimmingCharacters(in: .whitespaces).isEmpty:
+            return try await findPhotos(showing: args["content"] as? String ?? "", look: (args["action"] as? String) == "look",
+                                        question: args["question"] as? String ?? question, language: language)
+
         case "photos":
             let look = (args["action"] as? String) == "look"
             let count = max(1, min(look ? 4 : 12, args["count"] as? Int ?? (look ? 1 : 12)))
@@ -231,6 +236,37 @@ final class Brain: ObservableObject {
         default:
             return (settings.say("I can't do that here.", "Dat kan ik hier niet."), [])
         }
+    }
+
+    /// While looking through the photos the first time: "340/1118" (shown under Dave's name).
+    @Published var progress: String?
+
+    /// "Find my photos of a dog": by what's in them, recognised on the phone (PhotoIndex). With [look], the best few are
+    /// also shown to the AI to answer about them ("what breed is the dog in my photos?").
+    private func findPhotos(showing content: String, look: Bool, question: String, language: String) async throws -> (String, [UIImage]) {
+        let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+        guard status == .authorized || status == .limited else {
+            return (settings.say("I'm not allowed to see your photos. Turn it on in iOS' settings → Dave → Photos.",
+                                 "Ik mag je foto's niet zien. Zet het aan in de iOS-instellingen → Dave → Foto's."), [])
+        }
+        let terms = content.split(separator: ",").map { String($0) }
+        let matches = await PhotoIndex.shared.search(terms) { [weak self] done, total in
+            Task { @MainActor in self?.progress = "📷 \(done)/\(total)" }
+        }
+        progress = nil
+        if Task.isCancelled { throw CancellationError() }
+        let what = terms.first?.trimmingCharacters(in: .whitespaces) ?? content
+        guard !matches.isEmpty else {
+            return (settings.say("I didn't find any photos with \(what).", "Ik vond geen foto's met \(what)."), [])
+        }
+        let shown = await PhoneTools.images(of: matches.prefix(look ? 4 : 8).map(\.asset), size: look ? 1600 : 400)
+        if look {
+            return (try await Groq.look(at: shown, question: question, what: "photos from the user's library that show \(content), newest first",
+                                        language: language, settings: settings), shown)
+        }
+        let newest = matches[0].asset.creationDate.map(when) ?? "?"
+        return (settings.say("I found \(matches.count) \(matches.count == 1 ? "photo" : "photos") with \(what); the newest is from \(newest).",
+                             "Ik vond \(matches.count) \(matches.count == 1 ? "foto" : "foto's") met \(what); de nieuwste is van \(newest)."), shown)
     }
 
     /// "today at 14:05", "yesterday at 9:12", "3 October"
