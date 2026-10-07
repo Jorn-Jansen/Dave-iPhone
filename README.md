@@ -9,7 +9,8 @@ Dave, the voice assistant, as an iPhone app. Tap the orb and talk (English or Du
 - **Apps:** "open Spotify", "search lofi in Spotify", "directions to Utrecht", "open reddit.com"
 - **Shortcuts:** "run my shortcut Goodnight" (a Siri Shortcut can open any app or change settings)
 - **Clipboard:** "what did I copy?", "translate what I copied", "what's in the picture I copied?"
-- **Photos:** "what's in my last screenshot?", "how many photos did I take yesterday?", "show my favourites from last week"
+- **Photos:** "find my photos of a dog", "what's in my last screenshot?", "how many photos did I take yesterday?",
+  "show my favourites from last week" (what's in your photos is recognised on the iPhone itself)
 - **Files:** "read this file", "summarise a PDF" (you pick the file)
 - **Tabs like Dave's window on the PC:** your reminders, memories, music and screen time (with Dave on your PC)
 - **Themes:** the same 7 as on the PC (Aurora, Ember, Toxic, Ocean, Sakura, Midnight, Legacy), in the settings
