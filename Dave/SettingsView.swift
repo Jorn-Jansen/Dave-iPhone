@@ -34,11 +34,18 @@ struct SettingsView: View {
                     }
                     .disabled(pairing || !settings.hasPC)
                     if !pairStatus.isEmpty { Text(pairStatus).font(.footnote).foregroundStyle(.secondary) }
+                    if let away = settings.pcAddresses.first(where: { $0.hasPrefix("100.") }) {
+                        Label(settings.say("Away from home too, through Tailscale (\(away))", "Ook als je niet thuis bent, via Tailscale (\(away))"),
+                              systemImage: "globe").font(.footnote).foregroundStyle(.green)
+                    } else if settings.hasPC {
+                        Label(settings.say("Only on the same Wi-Fi as your PC", "Alleen op dezelfde wifi als je pc"), systemImage: "wifi")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
                 } header: {
                     Text(settings.say("Your PC", "Je pc"))
                 } footer: {
-                    Text(settings.say("On the PC: Dave's settings → iPhone app → turn on and save. The address and code are shown there. Connecting also copies your Groq key, name and language.",
-                                      "Op de pc: instellingen van Dave → iPhone-app → aanzetten en opslaan. Daar staan het adres en de code. Koppelen neemt ook je Groq-sleutel, naam en taal over."))
+                    Text(settings.say("On the PC: Dave's settings → iPhone app → turn on and save. The address and code are shown there. Connecting also copies your Groq key, name and language.\n\nAway from home too: install Tailscale (free, tailscale.com) on your PC and this iPhone, log in with the same account on both, and connect once more. Dave then finds your PC by himself, at home and away.",
+                                      "Op de pc: instellingen van Dave → iPhone-app → aanzetten en opslaan. Daar staan het adres en de code. Koppelen neemt ook je Groq-sleutel, naam en taal over.\n\nOok als je niet thuis bent: installeer Tailscale (gratis, tailscale.com) op je pc en deze iPhone, log op beide in met hetzelfde account, en koppel nog één keer. Dave vindt je pc dan zelf, thuis en onderweg."))
                 }
 
                 Section {
@@ -145,6 +152,7 @@ struct SettingsView: View {
             if let country = config["country"] as? String, !country.isEmpty { settings.country = country }
             if let memories = config["memories"] as? [String] { settings.memories = memories }
             if let spotify = config["spotifyClientId"] as? String, !spotify.isEmpty { settings.spotifyClientId = spotify }
+            if let addresses = config["addresses"] as? [String], !addresses.isEmpty { settings.pcAddresses = addresses }
             settings.pcLinked = true
             pairStatus = settings.say("✅ Connected to \(settings.displayName) on your PC.", "✅ Gekoppeld aan \(settings.displayName) op je pc.")
         } catch {

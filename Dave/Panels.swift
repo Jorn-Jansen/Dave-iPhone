@@ -62,6 +62,9 @@ final class PCData: ObservableObject {
         watching = json["watching"] as? [String] ?? []
         memories = json["memories"] as? [String] ?? []
         settings.memories = memories // what the phone's AI knows about you stays the same as on the PC
+        if fresh, let addresses = json["addresses"] as? [String], !addresses.isEmpty, addresses != settings.pcAddresses {
+            settings.pcAddresses = addresses // e.g. Tailscale installed since connecting: away from home works without connecting again
+        }
         let screen = json["screen"] as? [String: Any]
         today = list("today", in: screen).map { AppTime(app: $0["app"] as? String ?? "", seconds: $0["seconds"] as? Int ?? 0) }
         week = list("week", in: screen).map { AppTime(app: $0["app"] as? String ?? "", seconds: $0["seconds"] as? Int ?? 0) }
