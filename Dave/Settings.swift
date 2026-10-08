@@ -13,6 +13,10 @@ final class Settings: ObservableObject {
     /// The PC's address on the network (e.g. 192.168.1.20) and the code from Dave's settings on the PC.
     @Published var pcAddress: String { didSet { defaults.set(pcAddress, forKey: "pcAddress"); if pcAddress != oldValue { pcLinked = false } } }
     @Published var pcCode: String { didSet { defaults.set(pcCode, forKey: "pcCode"); if pcCode != oldValue { pcLinked = false } } }
+    /// Every address the PC said it can be reached at (home network, and Tailscale's 100.x for away from home).
+    @Published var pcAddresses: [String] { didSet { defaults.set(pcAddresses, forKey: "pcAddresses") } }
+    /// The address that answered last time: tried first.
+    var pcLastAddress: String { didSet { defaults.set(pcLastAddress, forKey: "pcLastAddress") } }
     /// The PC answered the last time it was tried (connecting or a question): only then it says "linked".
     @Published var pcLinked: Bool { didSet { defaults.set(pcLinked, forKey: "pcLinked") } }
     /// Things the user asked Dave to remember (copied from the PC when connecting).
@@ -35,6 +39,8 @@ final class Settings: ObservableObject {
         pcAddress = defaults.string(forKey: "pcAddress") ?? ""
         pcCode = defaults.string(forKey: "pcCode") ?? ""
         pcLinked = defaults.bool(forKey: "pcLinked")
+        pcAddresses = defaults.stringArray(forKey: "pcAddresses") ?? []
+        pcLastAddress = defaults.string(forKey: "pcLastAddress") ?? ""
         memories = defaults.stringArray(forKey: "memories") ?? []
         theme = defaults.string(forKey: "theme") ?? "aurora"
         spotifyClientId = defaults.string(forKey: "spotifyClientId") ?? ""

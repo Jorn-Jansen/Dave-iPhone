@@ -38,7 +38,7 @@ enum PCLink {
 
     /// The PC Dave's version ("1.4.0"), or nil when he can't be reached.
     static func version(settings: Settings) async -> String? {
-        guard let url = try? url("/hello", settings: settings) else { return nil }
+        guard (try? await hello(settings: settings)) != nil, let url = try? url("/hello", settings: settings) else { return nil }
         guard let (data, _) = try? await URLSession.shared.data(for: URLRequest(url: url, timeoutInterval: 5)),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
         return json["version"] as? String
@@ -50,26 +50,48 @@ enum PCLink {
         return try await post("/pair", body: [:], settings: settings, timeout: 10)
     }
 
-    /// Does Dave on the PC answer (within a few seconds)? Tried twice: after the phone was idle, the first message to the
-    /// PC can take a few seconds to find its way (seen with mesh Wi-Fi), the second one is then quick.
+    /// The address that answered last: the rest of a request goes there.
+    private static var active: String?
+
+    /// Where the PC may be: the address that worked last time, the one typed in, and every address the PC gave (home
+    /// network, Tailscale's 100.x). At home the home address answers; away from home, with Tailscale, the 100.x one.
+    private static func candidates(_ settings: Settings) -> [String] {
+        var seen = Set<String>()
+        return ([settings.pcLastAddress, settings.pcAddress] + settings.pcAddresses)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
+
+    /// Does Dave on the PC answer (within a few seconds), and at which address? Each address is tried, twice over: after
+    /// the phone was idle, the first message to the PC can take a few seconds to find its way (seen with mesh Wi-Fi).
     private static func hello(settings: Settings) async throws {
-        var request = URLRequest(url: try url("/hello", settings: settings), timeoutInterval: 4)
-        request.httpMethod = "GET"
-        for attempt in 0..<2 {
-            do {
-                let (_, response) = try await URLSession.shared.data(for: request)
-                guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw Failure(message: notDave(settings)) }
-                return
-            } catch let error as Failure { throw error }
-            catch {
-                if error is CancellationError || (error as? URLError)?.code == .cancelled { throw CancellationError() }
-                if attempt == 1 || (error as? URLError)?.code != .timedOut { throw explain(error, settings: settings) }
+        var lastError: Error?
+        for _ in 0..<2 {
+            for address in candidates(settings) {
+                var request = URLRequest(url: try url("/hello", at: address, settings: settings), timeoutInterval: 3.5)
+                request.httpMethod = "GET"
+                do {
+                    let (_, response) = try await URLSession.shared.data(for: request)
+                    guard (response as? HTTPURLResponse)?.statusCode == 200 else { lastError = Failure(message: notDave(settings)); continue }
+                    active = address
+                    if settings.pcLastAddress != address { settings.pcLastAddress = address }
+                    return
+                } catch {
+                    if error is CancellationError || (error as? URLError)?.code == .cancelled { throw CancellationError() }
+                    lastError = error
+                }
             }
         }
+        if let failure = lastError as? Failure { throw failure }
+        throw explain(lastError ?? URLError(.timedOut), settings: settings)
     }
 
     private static func url(_ path: String, settings: Settings) throws -> URL {
-        var address = settings.pcAddress.trimmingCharacters(in: .whitespaces)
+        try url(path, at: active ?? candidates(settings).first ?? "", settings: settings)
+    }
+
+    private static func url(_ path: String, at address: String, settings: Settings) throws -> URL {
+        var address = address
         if address.hasPrefix("http://") { address.removeFirst(7) }
         if !address.contains(":") { address += ":\(port)" }
         guard let url = URL(string: "http://\(address)\(path)") else {
@@ -111,9 +133,15 @@ enum PCLink {
         guard let code = (error as? URLError)?.code else { return Failure(message: error.localizedDescription) }
         switch code {
         case .timedOut:
+            let tailscale = candidates(settings).contains { $0.hasPrefix("100.") }
+            let away = tailscale
+                ? settings.say(" Away from home? Check that Tailscale is on, on your iPhone and your PC.",
+                               " Niet thuis? Check of Tailscale aan staat, op je iPhone en je pc.")
+                : settings.say(" Away from home? That needs Tailscale (free, tailscale.com) on your PC and iPhone, logged in with the same account; then connect once more at home.",
+                               " Niet thuis? Daarvoor is Tailscale nodig (gratis, tailscale.com) op je pc en iPhone, ingelogd met hetzelfde account; koppel daarna thuis nog één keer.")
             return Failure(message: settings.say(
-                "Your PC doesn't answer. Usually Windows' firewall blocks Dave: on the PC, allow Dave for private and public networks (Start → \"Allow an app through Windows Firewall\"). Also check the address, and that you're on the same Wi-Fi, not a guest network.",
-                "Je pc antwoordt niet. Meestal blokkeert de firewall van Windows Dave: sta Dave op de pc toe voor privé- en openbare netwerken (Start → \"Een app toestaan via Windows Firewall\"). Check ook het adres, en of je op dezelfde wifi zit, geen gastnetwerk."))
+                "Your PC doesn't answer. Is it on, with Dave running? At home, Windows' firewall can block Dave: on the PC, allow Dave for private and public networks (Start → \"Allow an app through Windows Firewall\").",
+                "Je pc antwoordt niet. Staat hij aan, met Dave? Thuis kan de firewall van Windows Dave blokkeren: sta Dave op de pc toe voor privé- en openbare netwerken (Start → \"Een app toestaan via Windows Firewall\").") + away)
         case .cannotConnectToHost:
             return Failure(message: settings.say(
                 "The PC is there, but Dave isn't listening. Is Dave running, with iPhone app turned on in his settings?",
