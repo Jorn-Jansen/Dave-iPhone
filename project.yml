@@ -3,24 +3,29 @@ options:
   bundleIdPrefix: com.jornjansen
   deploymentTarget:
     iOS: "16.0"
+settings:
+  base:
+    # The version, shared by the app and its widget
+    MARKETING_VERSION: "1.3.0"
+    CURRENT_PROJECT_VERSION: "9"
+    TARGETED_DEVICE_FAMILY: "1"
+    SWIFT_VERSION: "5.0"
+    CODE_SIGNING_ALLOWED: "NO"
+    CODE_SIGNING_REQUIRED: "NO"
+    CODE_SIGN_IDENTITY: ""
 targets:
   Dave:
     type: application
     platform: iOS
     sources:
       - Dave
+    dependencies:
+      - target: DaveWidget
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jornjansen.dave
         PRODUCT_NAME: Dave
-        MARKETING_VERSION: "1.3.0"
-        CURRENT_PROJECT_VERSION: "9"
-        TARGETED_DEVICE_FAMILY: "1"
-        SWIFT_VERSION: "5.0"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        CODE_SIGNING_ALLOWED: "NO"
-        CODE_SIGNING_REQUIRED: "NO"
-        CODE_SIGN_IDENTITY: ""
     info:
       path: Dave/Info.plist
       properties:
@@ -39,3 +44,32 @@ targets:
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
           NSAllowsLocalNetworking: true
+        # dave-iphone://talk: the widget starts listening
+        CFBundleURLTypes:
+          - CFBundleURLName: com.jornjansen.dave
+            CFBundleURLSchemes:
+              - dave-iphone
+        # "Open in Dave" for any file (from Files or another app): Dave sends it to the PC
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: File
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - public.item
+        LSSupportsOpeningDocumentsInPlace: false
+  DaveWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - DaveWidget
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jornjansen.dave.widget
+        PRODUCT_NAME: DaveWidget
+    info:
+      path: DaveWidget/Info.plist
+      properties:
+        CFBundleDisplayName: Dave
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension

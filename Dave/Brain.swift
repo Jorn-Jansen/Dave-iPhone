@@ -6,6 +6,9 @@ import UIKit
 /// Dave on the PC ("pause the music on my PC", "lock my PC", "what's on my screen?").
 @MainActor
 final class Brain: ObservableObject {
+    /// One Dave for the whole app: the chat, Siri, the widget and "Open in Dave" all talk to this one.
+    static let shared = Brain()
+
     enum State { case idle, listening, thinking, speaking }
 
     struct Line: Identifiable {
@@ -39,6 +42,22 @@ final class Brain: ObservableObject {
             work?.cancel()
             progress = nil
             stopped()
+        }
+    }
+
+    /// The widget ("Talk to Dave"): start listening, unless he's already busy.
+    func talkFromWidget() {
+        if state == .idle { micTapped() }
+    }
+
+    /// "Open in Dave" from the Files app (or another app's share sheet): send that file to the PC.
+    func received(file url: URL) {
+        add(Line(fromUser: true, text: "📎 " + url.lastPathComponent))
+        state = .thinking
+        work = Task {
+            let reply = await PhoneTools.send(file: url, settings: settings)
+            if Task.isCancelled { return }
+            await answer(reply, language: settings.language)
         }
     }
 
@@ -126,13 +145,9 @@ final class Brain: ObservableObject {
         if Date().timeIntervalSince(lastActivity) > 600 { history.removeAll() }
         lastActivity = Date()
 
-        let context = "[It's \(now()). Answer in \(language.hasPrefix("nl") ? "Dutch" : "English").]"
-        var messages: [[String: Any]] = [["role": "system", "content": systemPrompt()]]
-        messages += history
-        messages.append(["role": "user", "content": "\(context)\n\n\(text)"])
+        let messages = conversation(text, language: language)
 
         do {
-            let tools = PhoneTools.definitions + (settings.hasPC ? [pcControlTool, pcTool] : [])
             let message = try await Groq.chat(messages: messages, tools: tools, settings: settings)
             if Task.isCancelled { stopped(); return } // stopped while the AI was answering: ignore its answer
             if let calls = message["tool_calls"] as? [[String: Any]], let call = calls.first,
@@ -158,6 +173,41 @@ final class Brain: ObservableObject {
         } catch {
             if Task.isCancelled { stopped(); return }
             await answer(error.localizedDescription, language: language)
+        }
+    }
+
+    /// The instructions, the conversation so far, and the new question with the time and the language to answer in.
+    private func conversation(_ text: String, language: String) -> [[String: Any]] {
+        let context = "[It's \(now()). Answer in \(language.hasPrefix("nl") ? "Dutch" : "English").]"
+        var messages: [[String: Any]] = [["role": "system", "content": systemPrompt()]]
+        messages += history
+        messages.append(["role": "user", "content": "\(context)\n\n\(text)"])
+        return messages
+    }
+
+    private var tools: [[String: Any]] { PhoneTools.definitions + (settings.hasPC ? [pcControlTool, pcTool] : []) }
+
+    /// For Siri ("Hey Siri, ask Dave…"): the same thinking, without the screen or Dave's voice (Siri says it). Returns the answer.
+    func reply(to text: String) async -> String {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return settings.say("What did you want to ask?", "Wat wilde je vragen?") }
+        let language = settings.language
+        do {
+            let message = try await Groq.chat(messages: conversation(text, language: language), tools: tools, settings: settings)
+            if let calls = message["tool_calls"] as? [[String: Any]], let call = calls.first,
+               let function = call["function"] as? [String: Any], let name = function["name"] as? String {
+                if name == "read_file" { return settings.say("Open Dave to pick the file.", "Open Dave om het bestand te kiezen.") }
+                let argumentText = function["arguments"] as? String ?? "{}"
+                let arguments = (try? JSONSerialization.jsonObject(with: Data(argumentText.utf8)) as? [String: Any]) ?? [:]
+                let (reply, _) = try await run(name, arguments, question: text, language: language)
+                remember(text, toolCall: (call["id"] as? String ?? UUID().uuidString, name, argumentText), result: reply.isEmpty ? "Done." : reply)
+                return reply.isEmpty ? settings.say("Done.", "Klaar.") : reply
+            }
+            let reply = speakable(message["content"] as? String ?? "")
+            remember(text, answer: reply)
+            return reply.isEmpty ? settings.say("Sorry, I didn't get an answer for that.", "Sorry, daar kreeg ik geen antwoord op.") : reply
+        } catch {
+            return error.localizedDescription
         }
     }
 
@@ -190,6 +240,17 @@ final class Brain: ObservableObject {
             }
 
         case "music": return (try await PhoneTools.music(args, settings: settings), [])
+
+        case "phone_reminder":
+            if (args["action"] as? String) == "cancel" {
+                let count = await PhoneReminders.cancel(args["which"] as? String ?? "")
+                return (count == 0 ? settings.say("There was no reminder like that.", "Zo'n herinnering was er niet.")
+                                   : settings.say("Okay, cancelled \(count).", "Oké, \(count) geannuleerd."), [])
+            }
+            return (await PhoneReminders.set(args, settings: settings), [])
+
+        case "send_to_pc":
+            return (await PhoneTools.sendToPC(args, settings: settings, pickFile: { await self.pickFile() }), [])
         case "open_app": return (await PhoneTools.openApp(args, settings: settings), [])
         case "run_shortcut": return (await PhoneTools.runShortcut(args, settings: settings), [])
 
@@ -331,13 +392,14 @@ final class Brain: ObservableObject {
             "function": [
                 "name": "pc_control",
                 "description": "Control the user's Windows PC directly (fast): its music like the media keys, its volume (the whole PC or one app), "
-                    + "shuffle or repeat, locking it, opening or closing a program, opening a website, quiet mode. "
+                    + "shuffle or repeat, locking it, turning it off / restarting / sleep (now or in some minutes, or cancel that), "
+                    + "opening or closing a program, opening a website, quiet mode. "
                     + "For anything else on the PC (questions, its screen, files, reminders, notifications), use pc.",
                 "parameters": [
                     "type": "object",
                     "properties": [
-                        "command": ["type": "string", "enum": ["media_control", "set_volume", "music_settings", "lock_pc", "open_app", "close_app", "open_website", "quiet_mode"]],
-                        "action": ["type": "string", "enum": ["play", "pause", "next", "previous"], "description": "media_control"],
+                        "command": ["type": "string", "enum": ["media_control", "set_volume", "music_settings", "lock_pc", "power", "open_app", "close_app", "open_website", "quiet_mode"]],
+                        "action": ["type": "string", "enum": ["play", "pause", "next", "previous", "shutdown", "restart", "sleep", "cancel"], "description": "media_control: play…previous; power: shutdown, restart, sleep, or cancel a planned one"],
                         "app": ["type": "string", "description": "set_volume: one app, e.g. 'Discord'; empty for the whole PC"],
                         "change": ["type": "string", "enum": ["up", "down"], "description": "set_volume: louder or quieter"],
                         "level": ["type": "integer", "description": "set_volume: 0-100"],
@@ -346,7 +408,7 @@ final class Brain: ObservableObject {
                         "url": ["type": "string", "description": "open_website: the address"],
                         "search": ["type": "string", "description": "open_website: search words"],
                         "on": bool,
-                        "minutes": ["type": "integer", "description": "quiet_mode: how long; 0 = until turned off"],
+                        "minutes": ["type": "integer", "description": "quiet_mode: how long (0 = until turned off); power: in how many minutes (0 = now)"],
                         "shuffle": bool,
                         "repeat": ["type": "string", "enum": ["track", "context", "off"]],
                     ],
@@ -382,10 +444,12 @@ final class Brain: ObservableObject {
         Only end with a question when you really need an answer; never add filler questions like "Anything else?".
         """
         prompt += "\nOn this iPhone you can open apps (and search in them), run the user's Shortcuts, work with what they copied, look at their photos, "
-            + "and read a file they pick. Use the matching command instead of saying you can't."
+            + "read a file they pick, set reminders and timers on the iPhone (phone_reminder), and send things to their PC (send_to_pc). "
+            + "Use the matching command instead of saying you can't. Reminders and timers go on the iPhone unless they say \"on my PC\"."
         if settings.hasPC {
             prompt += "\nYou also run on the user's Windows PC. For things on that PC (\"on my PC\", \"on my computer\"): pc_control for its music buttons, "
-                + "volume, locking it, opening or closing programs and websites; the pc tool for everything else there (questions, its screen, files, reminders). "
+                + "volume, locking it, turning it off or restarting, opening or closing programs and websites; the pc tool for everything else there "
+                + "(questions, its screen, files, reminders on the PC, what's using it, downloads, where they left off). "
                 + "Apps and photos without \"PC\" mean this iPhone. Music without \"PC\": the music command."
         }
         if !settings.memories.isEmpty {

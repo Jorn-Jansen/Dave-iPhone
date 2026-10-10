@@ -23,6 +23,7 @@ jobs:
           xcodebuild -project Dave.xcodeproj -target Dave -configuration Release -sdk iphoneos \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build | tee build.log | grep -E "error:|warning: .*deprecated|BUILD" || true
           grep -q "BUILD SUCCEEDED" build.log && test -f build/Release-iphoneos/Dave.app/Dave
+          echo "Extensions:"; ls build/Release-iphoneos/Dave.app/PlugIns || echo "(none)"
 
       - name: Show the end of the build log
         if: failure()

@@ -62,6 +62,7 @@ final class PCData: ObservableObject {
         watching = json["watching"] as? [String] ?? []
         memories = json["memories"] as? [String] ?? []
         settings.memories = memories // what the phone's AI knows about you stays the same as on the PC
+        if fresh, let topic = json["ntfyTopic"] as? String, topic != settings.ntfyTopic { settings.ntfyTopic = topic }
         if fresh, let addresses = json["addresses"] as? [String], !addresses.isEmpty, addresses != settings.pcAddresses {
             settings.pcAddresses = addresses // e.g. Tailscale installed since connecting: away from home works without connecting again
         }
@@ -88,8 +89,11 @@ struct Panel<Content: View>: View {
     @ObservedObject var data: PCData
     @State private var showSettings = false
     let content: Content
+    /// False for a tab that also has things of its own (phone reminders): it shows its content without a PC too.
+    let needsPC: Bool
 
-    init(_ title: String, data: PCData, @ViewBuilder content: () -> Content) {
+    init(_ title: String, data: PCData, needsPC: Bool = true, @ViewBuilder content: () -> Content) {
+        self.needsPC = needsPC
         self.title = title
         self.data = data
         self.content = content()
@@ -116,7 +120,9 @@ struct Panel<Content: View>: View {
                     }
                 }
                 .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 4)
-                if !settings.hasPC {
+                if !needsPC {
+                    content
+                } else if !settings.hasPC {
                     note(settings.say("Connect me to your PC (⚙) to see this here.", "Koppel me aan je pc (⚙) om dit hier te zien."))
                 } else if !data.loaded {
                     if let problem = data.problem { note("⚠️ " + problem) }
@@ -168,13 +174,46 @@ func duration(_ seconds: Int, _ settings: Settings) -> String {
 
 struct RemindersPanel: View {
     @ObservedObject var data: PCData
+    @State private var phone: [PhoneReminders.Reminder] = []
     private let settings = Settings.shared
 
     var body: some View {
-        Panel(settings.say("Reminders", "Herinneringen"), data: data) {
+        Panel(settings.say("Reminders", "Herinneringen"), data: data, needsPC: false) {
             GlassList(data: data) {
                 Section {
-                    if data.reminders.isEmpty {
+                    if phone.isEmpty {
+                        row { Text(settings.say("None. Say \"remind me at 8 to…\" or \"timer for 10 minutes\".", "Geen. Zeg \"herinner me om 8 uur aan…\" of \"timer van 10 minuten\".")).foregroundStyle(.secondary) }
+                    }
+                    ForEach(phone) { reminder in
+                        row {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(reminder.message)
+                                Text(reminder.when).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .onDelete { offsets in
+                        for index in offsets { PhoneReminders.delete(phone[index].id) }
+                        Task { await loadPhone() }
+                    }
+                } header: {
+                    Text(settings.say("On this iPhone · swipe to delete", "Op deze iPhone · veeg om te verwijderen"))
+                }
+
+                if settings.hasPC { pcSections }
+            }
+        }
+        .task { await loadPhone() }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in Task { await loadPhone() } }
+    }
+
+    private func loadPhone() async { phone = await PhoneReminders.all(settings: settings) }
+
+    @ViewBuilder private var pcSections: some View {
+                Section {
+                    if !data.loaded {
+                        row { Text(data.problem.map { "⚠️ " + $0 } ?? settings.say("Loading…", "Laden…")).foregroundStyle(.secondary) }
+                    } else if data.reminders.isEmpty {
                         row { Text(settings.say("No reminders. Say \"remind me at 8 to…\" to your PC Dave.", "Geen herinneringen. Zeg \"herinner me om 8 uur aan…\" tegen Dave.")).foregroundStyle(.secondary) }
                     }
                     ForEach(data.reminders) { reminder in
@@ -202,10 +241,8 @@ struct RemindersPanel: View {
                         }
                     }
                 } header: {
-                    Text(settings.say("Watching for", "Let op"))
+                    Text(settings.say("Watching for (on your PC)", "Let op (op je pc)"))
                 }
-            }
-        }
     }
 }
 
