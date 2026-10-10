@@ -5,7 +5,11 @@ Dave, the voice assistant, as an iPhone app. Tap the orb and talk (English or Du
 ## What he can do on the iPhone
 - **Music:** "play the music", "pause", "next song", "what's playing?", "play lofi", "play my Chill playlist": Spotify
   (Premium) on whichever device it plays on, or Apple Music when you're not logged in to Spotify
-- **Your PC:** "pause the music on my PC", "PC volume to 20", "lock my PC", "open Roblox on my PC", "what's on my PC screen?"
+- **Your PC:** "pause the music on my PC", "PC volume to 20", "lock my PC", "turn off my PC in 30 minutes", "open Roblox on my PC",
+  "what's on my PC screen?", "is my PC still downloading?", "where did I leave off on my PC?"
+- **Reminders and timers on the iPhone:** "remind me at 8 to call mom", "timer for 10 minutes" (real notifications, also with the PC off)
+- **Siri:** "Hey Siri, ask Dave" — Siri asks your question, Dave answers
+- **Send to your PC:** "send my last photo to my PC", "send what I copied to my PC", or "Open in Dave" for a file
 - **Apps:** "open Spotify", "search lofi in Spotify", "directions to Utrecht", "open reddit.com"
 - **Shortcuts:** "run my shortcut Goodnight" (a Siri Shortcut can open any app or change settings)
 - **Clipboard:** "what did I copy?", "translate what I copied", "what's in the picture I copied?"
@@ -29,6 +33,11 @@ Dave isn't in the App Store, so you sideload him with your own Apple ID:
    This also copies your Groq key, name and language, so you don't have to type them.
 
 The phone and PC need to be on the same Wi-Fi. To use it outside your home, install [Tailscale](https://tailscale.com) on both and use the PC's Tailscale address (100.x.x.x).
+
+## Notifications from your PC
+Reminders and heads-ups from your PC ("Roblox closed", "your download is done") and things you send from the PC ("send this to my phone")
+arrive as notifications through the free [ntfy](https://ntfy.sh) app: on the PC turn on Dave's settings → iPhone app → **Notifications on my phone**,
+then in ntfy tap + and subscribe to the channel shown there (also under ⚙ in this app).
 
 ## Spotify
 1. On [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard) → your Spotify app (the one Dave on the PC uses) →
