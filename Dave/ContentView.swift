@@ -20,7 +20,7 @@ struct ContentView: View {
                 chat
                 controls
             }
-            if !Theme.current.legacy { ScreenGlow(state: brain.state, level: brain.level) } // like Siri, along the screen's edges
+            if !Theme.current.legacy { ScreenGlow(state: brain.state, level: brain.level) } // neon lines along the screen's edges, drawn in by two orbs
         }
         .id(settings.theme) // another theme: draw everything again in its colours
         .sheet(isPresented: $showSettings) { SettingsView() }
@@ -143,7 +143,7 @@ struct ContentView: View {
         VStack(spacing: 14) {
             Button { brain.micTapped() } label: {
                 ZStack {
-                    if !Theme.current.legacy { OrbEffects(state: brain.state, level: brain.level).frame(width: 190, height: 190) }
+                    if !Theme.current.legacy { OrbEffects(state: brain.state, level: brain.level).frame(width: 230, height: 230) }
                     Orb(state: brain.state, level: brain.level).frame(width: 96, height: 96)
                 }
                 .frame(width: 96, height: 96)
@@ -305,7 +305,7 @@ struct AuroraBackground: View {
                     blob(.davePurple, x: w * (0.3 + 0.2 * sin(t)) + dx, y: h * (0.25 + 0.1 * cos(t * 0.8)) + dy, size: w * 1.1)
                     blob(.davePink, x: w * (0.8 + 0.15 * cos(t * 1.1)) + dx * 0.7, y: h * (0.55 + 0.12 * sin(t * 0.7)) + dy * 0.7, size: w * 0.9)
                     blob(.daveCyan, x: w * (0.2 + 0.15 * cos(t * 0.6)) + dx * 1.2, y: h * (0.85 + 0.08 * sin(t)) + dy * 1.2, size: w * 0.8)
-                    Stars()
+                    ThemeBackdrop() // the theme's own effect: northern lights, embers, slime, light rays, petals or stars
                 }
             }
         }

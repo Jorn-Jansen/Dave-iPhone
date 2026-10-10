@@ -2,11 +2,12 @@ import CoreMotion
 import SwiftUI
 import UIKit
 
-// The effects around Dave (not in the Legacy theme): the sound ring, sparks and comets around the orb, the Siri-like glow along
-// the screen's edges, stars that move when you tilt the phone, the thinking orbs, and little taps you feel.
+// The effects around Dave (not in the Legacy theme): the sound ring and comets around the orb, stars that move when you tilt
+// the phone, the thinking orbs, and little taps you feel. Each theme's own effects and the glow along the screen's edges are
+// in ThemeEffects.
 
-/// Around the big orb: a ring of bars that moves with your voice, ripples while you talk, sparks orbiting it, and two comets
-/// racing around it while Dave thinks. Drawn around a 96-point orb, in a bigger square.
+/// Around the big orb: the theme's own effect, a ring of bars that moves with your voice, ripples while you talk, and two
+/// comets racing around it while Dave thinks. Drawn around a 96-point orb, in a bigger square.
 struct OrbEffects: View {
     let state: Brain.State
     let level: Float
@@ -19,6 +20,9 @@ struct OrbEffects: View {
                 let r: CGFloat = 48
                 let voice = CGFloat(level)
                 let colours: [Color] = [.davePurple, .davePink, .daveCyan, .daveViolet]
+
+                // The theme's own effect: northern lights, flames, slime, water, petals or stars
+                ThemeFX.aroundOrb(&context, centre: centre, r: r, voice: voice, t: t)
 
                 // Ripples spreading out while you talk
                 if state == .listening {
@@ -48,19 +52,6 @@ struct OrbEffects: View {
                     }
                 }
 
-                // Sparks orbiting the orb: a few when idle, more and faster when he's busy
-                let sparks = state == .idle ? 6 : 14
-                for i in 0..<sparks {
-                    let speed = (0.5 + Double(i % 5) * 0.14) * (state == .thinking ? 2.6 : state == .idle ? 0.7 : 1.3) * (i % 2 == 0 ? 1 : -1)
-                    let a = t * speed + Double(i) * 2.4
-                    let radius = r + 16 + CGFloat(i % 4) * 9 + CGFloat(sin(t * 1.3 + Double(i))) * 4
-                    let p = point(centre, a, radius)
-                    let s = 1.3 + CGFloat(i % 3) * 0.8
-                    let colour = colours[i % colours.count]
-                    context.fill(Path(ellipseIn: CGRect(x: p.x - s * 4, y: p.y - s * 4, width: s * 8, height: s * 8)), with: .color(colour.opacity(0.22)))
-                    context.fill(Path(ellipseIn: CGRect(x: p.x - s, y: p.y - s, width: s * 2, height: s * 2)), with: .color(.white.opacity(0.9)))
-                }
-
                 // Thinking: two comets racing around the orb, with fading tails
                 if state == .thinking {
                     for k in 0..<2 {
@@ -82,30 +73,6 @@ struct OrbEffects: View {
 
     private func point(_ c: CGPoint, _ angle: Double, _ radius: CGFloat) -> CGPoint {
         CGPoint(x: c.x + CGFloat(cos(angle)) * radius, y: c.y + CGFloat(sin(angle)) * radius)
-    }
-}
-
-/// Like Siri: light glowing along the edges of the screen while Dave listens (moving with your voice), thinks or talks.
-struct ScreenGlow: View {
-    let state: Brain.State
-    let level: Float
-
-    var body: some View {
-        let strength: Double = state == .listening ? 1 : state == .thinking ? 0.65 : state == .speaking ? 0.4 : 0
-        TimelineView(.animation(paused: strength == 0)) { timeline in
-            let t = timeline.date.timeIntervalSinceReferenceDate
-            let gradient = AngularGradient(colors: [.davePurple, .davePink, .daveCyan, .daveViolet, .davePurple], center: .center,
-                                           angle: .degrees(t * 80))
-            let width = 8 + CGFloat(state == .listening ? level : 0.15) * 16
-            ZStack {
-                RoundedRectangle(cornerRadius: 46, style: .continuous).strokeBorder(gradient, lineWidth: width).blur(radius: 14)
-                RoundedRectangle(cornerRadius: 46, style: .continuous).strokeBorder(gradient, lineWidth: 2.5).blur(radius: 1.5)
-            }
-        }
-        .opacity(strength)
-        .animation(.easeInOut(duration: 0.45), value: strength)
-        .ignoresSafeArea()
-        .allowsHitTesting(false)
     }
 }
 
