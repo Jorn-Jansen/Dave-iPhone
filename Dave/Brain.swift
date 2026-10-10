@@ -89,6 +89,7 @@ final class Brain: ObservableObject {
             return
         }
         state = .listening
+        Haptics.listen() // a tap you feel: Dave is listening
         stopRequested = false
         // Stop by itself once you've said something and then are quiet for a moment (or after 20 seconds)
         let started = Date()
@@ -122,7 +123,9 @@ final class Brain: ObservableObject {
     @discardableResult
     private func finishListening() -> URL? {
         stopRequested = true
-        return voice.stopRecording()
+        let recording = voice.stopRecording()
+        if recording != nil { Haptics.heard() }
+        return recording
     }
 
     /// Whisper says "dutch" or "english" (or "nl"/"en"); anything else: the main language.
@@ -371,6 +374,7 @@ final class Brain: ObservableObject {
 
     private func answer(_ text: String, language: String, viaPC: Bool = false, images: [UIImage] = []) async {
         add(Line(fromUser: false, text: text, viaPC: viaPC, images: images))
+        Haptics.answer()
         state = .speaking
         await voice.speak(text, language: language, rate: settings.speechRate)
         state = .idle

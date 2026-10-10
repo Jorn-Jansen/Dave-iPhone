@@ -20,6 +20,7 @@ struct ContentView: View {
                 chat
                 controls
             }
+            if !Theme.current.legacy { ScreenGlow(state: brain.state, level: brain.level) } // like Siri, along the screen's edges
         }
         .id(settings.theme) // another theme: draw everything again in its colours
         .sheet(isPresented: $showSettings) { SettingsView() }
@@ -106,8 +107,16 @@ struct ContentView: View {
             ScrollView {
                 LazyVStack(spacing: 10) {
                     if brain.lines.isEmpty { welcome }
-                    ForEach(brain.lines) { line in Bubble(line: line).id(line.id) }
+                    ForEach(brain.lines) { line in
+                        Bubble(line: line).id(line.id)
+                            .transition(.asymmetric(insertion: .modifier(active: Arrive(active: true, fromUser: line.fromUser),
+                                                                         identity: Arrive(active: false, fromUser: line.fromUser)),
+                                                    removal: .opacity))
+                    }
+                    if brain.state == .thinking && !Theme.current.legacy { ThinkingOrbs().id("thinking") }
                 }
+                .animation(.spring(response: 0.45, dampingFraction: 0.78), value: brain.lines.count)
+                .animation(.spring(response: 0.4, dampingFraction: 0.8), value: brain.state == .thinking)
                 .padding(.horizontal, 16).padding(.vertical, 12)
             }
             .scrollDismissesKeyboard(.interactively)
@@ -133,7 +142,11 @@ struct ContentView: View {
     private var controls: some View {
         VStack(spacing: 14) {
             Button { brain.micTapped() } label: {
-                Orb(state: brain.state, level: brain.level).frame(width: 96, height: 96)
+                ZStack {
+                    if !Theme.current.legacy { OrbEffects(state: brain.state, level: brain.level).frame(width: 190, height: 190) }
+                    Orb(state: brain.state, level: brain.level).frame(width: 96, height: 96)
+                }
+                .frame(width: 96, height: 96)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(settings.say("Talk to Dave", "Praat met Dave"))
@@ -169,6 +182,7 @@ struct ContentView: View {
 /// One message: yours on the right, Dave's on the left (💻 when it came from the PC).
 struct Bubble: View {
     let line: Brain.Line
+    @State private var flash = 1.0 // Dave's new messages flash with light along their edge, then it fades
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -199,6 +213,16 @@ struct Bubble: View {
                         : AnyShapeStyle(.ultraThinMaterial),
                     in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(.white.opacity(line.fromUser ? 0 : 0.1)))
+                .overlay {
+                    if !line.fromUser && !Theme.current.legacy {
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .stroke(AngularGradient(colors: [.daveCyan, .davePink, .davePurple, .daveCyan], center: .center), lineWidth: 1.5)
+                            .shadow(color: .daveCyan.opacity(0.8), radius: 10)
+                            .opacity(flash)
+                    }
+                }
+                .shadow(color: line.fromUser ? .davePurple.opacity(0.35) : .clear, radius: 12, y: 4)
+                .onAppear { withAnimation(.easeOut(duration: 1.6)) { flash = 0.18 } }
                 .textSelection(.enabled)
             if !line.fromUser { Spacer(minLength: 50) }
         }
@@ -259,6 +283,8 @@ struct Orb: View {
 
 /// Slowly drifting northern lights behind everything.
 struct AuroraBackground: View {
+    @ObservedObject private var tilt = Tilt.shared
+
     var body: some View {
         if Theme.current.legacy {
             // The original look: calm, no northern lights
@@ -273,11 +299,13 @@ struct AuroraBackground: View {
             let t = timeline.date.timeIntervalSinceReferenceDate / 8
             GeometryReader { geo in
                 let w = geo.size.width, h = geo.size.height
+                let dx = -tilt.x * 40, dy = tilt.y * 40 // the light moves along when you tilt the phone
                 ZStack {
                     Color.daveDeep
-                    blob(.davePurple, x: w * (0.3 + 0.2 * sin(t)), y: h * (0.25 + 0.1 * cos(t * 0.8)), size: w * 1.1)
-                    blob(.davePink, x: w * (0.8 + 0.15 * cos(t * 1.1)), y: h * (0.55 + 0.12 * sin(t * 0.7)), size: w * 0.9)
-                    blob(.daveCyan, x: w * (0.2 + 0.15 * cos(t * 0.6)), y: h * (0.85 + 0.08 * sin(t)), size: w * 0.8)
+                    blob(.davePurple, x: w * (0.3 + 0.2 * sin(t)) + dx, y: h * (0.25 + 0.1 * cos(t * 0.8)) + dy, size: w * 1.1)
+                    blob(.davePink, x: w * (0.8 + 0.15 * cos(t * 1.1)) + dx * 0.7, y: h * (0.55 + 0.12 * sin(t * 0.7)) + dy * 0.7, size: w * 0.9)
+                    blob(.daveCyan, x: w * (0.2 + 0.15 * cos(t * 0.6)) + dx * 1.2, y: h * (0.85 + 0.08 * sin(t)) + dy * 1.2, size: w * 0.8)
+                    Stars()
                 }
             }
         }
