@@ -2,7 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct ContentView: View {
-    @StateObject private var brain = Brain()
+    @ObservedObject private var brain = Brain.shared
     @StateObject private var updater = Updater()
     @Environment(\.scenePhase) private var scenePhase
     @State private var updateStatus = ""

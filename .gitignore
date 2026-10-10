@@ -1,6 +1,7 @@
 # Made by XcodeGen and Xcode (recreated on every build)
 Dave.xcodeproj/
 Dave/Info.plist
+DaveWidget/Info.plist
 build/
 DerivedData/
 Payload/

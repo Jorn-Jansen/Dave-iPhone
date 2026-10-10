@@ -25,6 +25,13 @@ enum PCLink {
         return reply["answer"] as? String ?? settings.say("Done.", "Klaar.")
     }
 
+    /// "Send this to my PC": a link, text, or a file (base64); returns what the PC did with it.
+    static func send(_ item: [String: Any], settings: Settings) async throws -> String {
+        try await hello(settings: settings)
+        let reply = try await post("/receive", body: item, settings: settings, timeout: 180)
+        return reply["answer"] as? String ?? settings.say("Sent.", "Verstuurd.")
+    }
+
     /// What Dave's window on the PC shows: reminders, memories, what he's watching for, music, screen time.
     static func state(settings: Settings) async throws -> [String: Any] {
         try await hello(settings: settings)

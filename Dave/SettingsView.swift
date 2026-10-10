@@ -48,6 +48,26 @@ struct SettingsView: View {
                                       "Op de pc: instellingen van Dave → iPhone-app → aanzetten en opslaan. Daar staan het adres en de code. Koppelen neemt ook je Groq-sleutel, naam en taal over.\n\nOok als je niet thuis bent: installeer Tailscale (gratis, tailscale.com) op je pc en deze iPhone, log op beide in met hetzelfde account, en koppel nog één keer. Dave vindt je pc dan zelf, thuis en onderweg."))
                 }
 
+                if settings.hasPC {
+                    Section {
+                        if settings.ntfyTopic.isEmpty {
+                            Text(settings.say("Off. Turn it on in Dave's settings on the PC: iPhone app → Notifications on my phone.",
+                                              "Uit. Zet het aan in de instellingen van Dave op de pc: iPhone-app → Meldingen op mijn telefoon."))
+                                .font(.footnote).foregroundStyle(.secondary)
+                        } else {
+                            LabeledContent(settings.say("Channel", "Kanaal"), value: settings.ntfyTopic).font(.footnote)
+                            Button(settings.say("Copy the channel", "Kopieer het kanaal")) { UIPasteboard.general.string = settings.ntfyTopic }
+                            Link(settings.say("Get ntfy (free)", "Download ntfy (gratis)"),
+                                 destination: URL(string: "itms-apps://search.itunes.apple.com/WebObjects/MZSearch.woa/wa/search?media=software&term=ntfy")!)
+                        }
+                    } header: {
+                        Text(settings.say("Notifications from your PC", "Meldingen van je pc"))
+                    } footer: {
+                        Text(settings.say("Reminders and heads-ups from your PC (\"Roblox closed\", \"your download is done\") as notifications here, when you're not at your PC. In the ntfy app: + → paste the channel (server ntfy.sh) → Subscribe.",
+                                          "Herinneringen en seintjes van je pc (\"Roblox is gesloten\", \"je download is klaar\") als melding hier, als je niet achter je pc zit. In de ntfy-app: + → plak het kanaal (server ntfy.sh) → Subscribe."))
+                    }
+                }
+
                 Section {
                     SecureField("gsk_…", text: $settings.groqKey).autocorrectionDisabled().textInputAutocapitalization(.never)
                 } header: {

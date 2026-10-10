@@ -15,6 +15,8 @@ final class Settings: ObservableObject {
     @Published var pcCode: String { didSet { defaults.set(pcCode, forKey: "pcCode"); if pcCode != oldValue { pcLinked = false } } }
     /// Every address the PC said it can be reached at (home network, and Tailscale's 100.x for away from home).
     @Published var pcAddresses: [String] { didSet { defaults.set(pcAddresses, forKey: "pcAddresses") } }
+    /// The PC's notification channel on ntfy (empty when notifications on the phone are off on the PC).
+    @Published var ntfyTopic: String { didSet { defaults.set(ntfyTopic, forKey: "ntfyTopic") } }
     /// The address that answered last time: tried first.
     var pcLastAddress: String { didSet { defaults.set(pcLastAddress, forKey: "pcLastAddress") } }
     /// The PC answered the last time it was tried (connecting or a question): only then it says "linked".
@@ -41,6 +43,7 @@ final class Settings: ObservableObject {
         pcLinked = defaults.bool(forKey: "pcLinked")
         pcAddresses = defaults.stringArray(forKey: "pcAddresses") ?? []
         pcLastAddress = defaults.string(forKey: "pcLastAddress") ?? ""
+        ntfyTopic = defaults.string(forKey: "ntfyTopic") ?? ""
         memories = defaults.stringArray(forKey: "memories") ?? []
         theme = defaults.string(forKey: "theme") ?? "aurora"
         spotifyClientId = defaults.string(forKey: "spotifyClientId") ?? ""

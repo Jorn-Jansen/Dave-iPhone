@@ -17,7 +17,20 @@ enum PhoneTools {
                   "kind": ["type": "string", "enum": ["any", "track", "artist", "playlist", "album"]],
                   "level": ["type": "integer", "description": "volume: 0-100"]],
                  required: ["action"]),
-            tool("open_app", "Open an app on the iPhone, optionally searching in it: 'open Spotify', 'search lofi in Spotify', "
+            tool("phone_reminder", "A reminder or timer on this iPhone, as a notification (also with the app closed and the PC off): "
+                 + "'remind me at 8 to call mom', 'timer for 10 minutes', 'every day at 7 take my pills'. Or cancel one.",
+                 ["action": ["type": "string", "enum": ["set", "cancel"]],
+                  "message": str("set: what to remind of, in the user's language"),
+                  "minutes": ["type": "number", "description": "set: from now (fractions allowed)"],
+                  "time": str("set: clock time HH:mm (24h), instead of minutes"),
+                  "repeat": ["type": "string", "enum": ["none", "daily"]],
+                  "which": str("cancel: words from the reminder; empty for all")],
+                 required: ["action"]),
+            tool("send_to_pc", "Send something from this iPhone to the user's PC: what they copied (a link opens in the PC's browser, "
+                 + "text goes on the PC's clipboard, a picture is saved), their last photo, or a file they pick (saved in Downloads on the PC).",
+                 ["what": ["type": "string", "enum": ["clipboard", "last_photo", "file"]]],
+                 required: ["what"]),
+            tool("open_app","Open an app on the iPhone, optionally searching in it: 'open Spotify', 'search lofi in Spotify', "
                  + "'directions to Utrecht', 'open youtube.com'. Also websites.",
                  ["app": str("The app's name, e.g. 'Spotify', 'WhatsApp', 'Maps'"),
                   "search": str("What to search or navigate to in it, if said"),
@@ -161,6 +174,75 @@ enum PhoneTools {
             return settings.say("For that, log me in to Spotify in the settings. Without it I can only play, pause and skip Apple Music.",
                                 "Daarvoor moet je me inloggen bij Spotify in de instellingen. Zonder kan ik alleen Apple Music afspelen, pauzeren en overslaan.")
         }
+    }
+
+    // MARK: Sending to the PC
+
+    /// "Send this to my PC": what was copied, the last photo, or a file (picked here). Returns what the PC said.
+    @MainActor
+    static func sendToPC(_ args: [String: Any], settings: Settings, pickFile: () async -> URL?) async -> String {
+        guard settings.hasPC else { return settings.say("Connect me to your PC first (⚙).", "Koppel me eerst aan je pc (⚙).") }
+        switch args["what"] as? String {
+        case "last_photo":
+            guard let (data, name) = await lastPhoto() else {
+                return settings.say("I can't get your last photo (is Photos access on for Dave?).", "Ik kan je laatste foto niet pakken (mag Dave bij je foto's?).")
+            }
+            return await deliver(["kind": "file", "name": name, "data": data.base64EncodedString()], settings: settings)
+        case "file":
+            guard let url = await pickFile() else { return settings.say("Okay, no file then.", "Oké, dan geen bestand.") }
+            return await send(file: url, settings: settings)
+        default:
+            let board = UIPasteboard.general
+            if board.hasImages, let image = board.image, let jpeg = image.jpegData(compressionQuality: 0.9) {
+                return await deliver(["kind": "file", "name": "Copied picture.jpg", "data": jpeg.base64EncodedString()], settings: settings)
+            }
+            if board.hasURLs, let url = board.url, url.scheme?.hasPrefix("http") == true {
+                return await deliver(["kind": "url", "text": url.absoluteString], settings: settings)
+            }
+            if let text = board.string?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
+                let isLink = !text.contains(" ") && (text.hasPrefix("http://") || text.hasPrefix("https://"))
+                return await deliver(["kind": isLink ? "url" : "text", "text": text], settings: settings)
+            }
+            return settings.say("Nothing is copied right now.", "Er is nu niets gekopieerd.")
+        }
+    }
+
+    /// A file (picked, or opened in Dave from another app) to the PC's Downloads.
+    @MainActor
+    static func send(file url: URL, settings: Settings) async -> String {
+        let access = url.startAccessingSecurityScopedResource()
+        defer { if access { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: url) else { return settings.say("I can't read that file.", "Ik kan dat bestand niet lezen.") }
+        return await deliver(["kind": "file", "name": url.lastPathComponent, "data": data.base64EncodedString()], settings: settings)
+    }
+
+    @MainActor
+    private static func deliver(_ item: [String: Any], settings: Settings) async -> String {
+        if let data = item["data"] as? String, data.count > 80_000_000 {
+            return settings.say("That's too big to send (the limit is about 60 MB).", "Dat is te groot om te sturen (de grens is zo'n 60 MB).")
+        }
+        do { return "📤 " + (try await PCLink.send(item, settings: settings)) }
+        catch { return error.localizedDescription }
+    }
+
+    /// The newest photo, as a JPEG the PC can open (iPhones save HEIC), with its own name.
+    private static func lastPhoto() async -> (Data, String)? {
+        let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+        guard status == .authorized || status == .limited else { return nil }
+        let options = PHFetchOptions()
+        options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+        options.fetchLimit = 1
+        guard let asset = PHAsset.fetchAssets(with: .image, options: options).firstObject else { return nil }
+        let original = PHAssetResource.assetResources(for: asset).first?.originalFilename ?? "Photo.jpg"
+        let name = (original as NSString).deletingPathExtension + ".jpg"
+        let data: Data? = await withCheckedContinuation { done in
+            let request = PHImageRequestOptions()
+            request.isNetworkAccessAllowed = true
+            request.deliveryMode = .highQualityFormat
+            PHImageManager.default().requestImageDataAndOrientation(for: asset, options: request) { data, _, _, _ in done.resume(returning: data) }
+        }
+        guard let data, let image = UIImage(data: data), let jpeg = image.jpegData(compressionQuality: 0.9) else { return nil }
+        return (jpeg, name)
     }
 
     // MARK: Clipboard
