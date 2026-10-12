@@ -438,6 +438,9 @@ enum EdgeLines {
         let uA = edgeU(orbA, rect), uB = edgeU(orbB, rect), trail = 0.45 + level * 0.25
 
         g.drawLayer { layer in
+            // Only where the orbs have just been: a mask of thin slices from the middle of the screen, each as visible as
+            // the spot where it meets the screen's edge
+            layer.clipToLayer { mask in revealMask(&mask, rect, uA: uA, uB: uB, travel: travel, trail: trail) }
             // A soft glow between and around the lines, so they melt into one band
             layer.drawLayer { glow in
                 glow.addFilter(.blur(radius: 7))
@@ -456,35 +459,43 @@ enum EdgeLines {
                 c.opacity = lines[k].opacity
                 c.stroke(closed(curves[k]), with: shading, style: StrokeStyle(lineWidth: lines[k].width, lineJoin: .round))
             }
-            // Only where the orbs have just been: a mask that goes around the screen from its middle
-            layer.blendMode = .destinationIn
-            layer.fill(Path(rect), with: .conicGradient(revealMask(rect, uA: uA, uB: uB, travel: travel, trail: trail), center: centre, angle: .zero))
         }
 
         orb(&g, curves[0], at: a, direction: 1, colour: .daveCyan, level: level)
         orb(&g, curves[0], at: b, direction: -1, colour: .davePink, level: level)
     }
 
-    /// How visible the edge is all the way around, as a conic gradient from the middle of the screen: for each direction,
-    /// the spot where it meets the screen's edge.
-    private static func revealMask(_ rect: CGRect, uA: Double, uB: Double, travel: Double, trail: Double) -> Gradient {
-        let steps = 240
-        let stops: [Gradient.Stop] = (0...steps).map { i in
-            let s = Double(i) / Double(steps), angle = s * 2 * .pi
+    /// How visible the edge is all the way around: thin slices from the middle of the screen, each as visible as the spot
+    /// where it meets the screen's edge (worked out the same way as where the orbs are, so the two always line up).
+    private static func revealMask(_ g: inout GraphicsContext, _ rect: CGRect, uA: Double, uB: Double, travel: Double, trail: Double) {
+        let steps = 360, centre = CGPoint(x: rect.midX, y: rect.midY)
+        let far = hypot(rect.width, rect.height) // past the corners
+        func visible(_ angle: Double) -> Double {
             let d = CGVector(dx: cos(angle), dy: sin(angle))
             let reach = min(abs(d.dx) > 1e-6 ? rect.width / 2 / abs(d.dx) : .infinity, abs(d.dy) > 1e-6 ? rect.height / 2 / abs(d.dy) : .infinity)
-            let p = CGPoint(x: rect.midX + d.dx * reach, y: rect.midY + d.dy * reach)
-            let u = edgeU(p, rect)
-            let v = max(behind(uA - u, travel: travel, trail: trail), behind(u - uB, travel: travel, trail: trail))
-            return Gradient.Stop(color: .white.opacity(v), location: s)
+            let u = edgeU(CGPoint(x: centre.x + d.dx * reach, y: centre.y + d.dy * reach), rect)
+            return max(behind(uA - u, travel: travel, trail: trail), behind(u - uB, travel: travel, trail: trail))
         }
-        return Gradient(stops: stops)
+        let step = 2 * Double.pi / Double(steps)
+        for i in 0..<steps {
+            let a0 = Double(i) * step, a1 = a0 + step
+            let v = visible(a0 + step / 2)
+            if v < 0.004 { continue }
+            // a hair wider than its share, so neighbouring slices leave no seams between them
+            let s0 = a0 - step * 0.15, s1 = a1 + step * 0.15
+            var slice = Path()
+            slice.move(to: centre)
+            slice.addLine(to: CGPoint(x: centre.x + CGFloat(cos(s0)) * far, y: centre.y + CGFloat(sin(s0)) * far))
+            slice.addLine(to: CGPoint(x: centre.x + CGFloat(cos(s1)) * far, y: centre.y + CGFloat(sin(s1)) * far))
+            slice.closeSubpath()
+            g.fill(slice, with: .color(.white.opacity(v)))
+        }
     }
 
     /// How visible a spot is that an orb passed [behind] (of a round) ago: full right behind it, fading away further back,
     /// a soft start just in front of it, and nothing where it hasn't been yet.
     private static func behind(_ value: Double, travel: Double, trail: Double) -> Double {
-        let x = value - floor(value), ahead = 0.03
+        let x = value - floor(value), ahead = 0.012 // about 30 points: inside the orb's glow
         if x > 1 - ahead {
             let a = (x - (1 - ahead)) / ahead
             return a * a * (3 - 2 * a) * min(1, max(0, travel / ahead))
@@ -570,21 +581,21 @@ enum EdgeLines {
 
     /// A ball of light (a coloured glow with a white core) going in [direction], with a tail fading out behind it.
     private static func orb(_ g: inout GraphicsContext, _ points: [CGPoint], at u: Double, direction: Double, colour: Color, level: Double) {
-        let n = Double(points.count), tail = 22
+        let n = Double(points.count), tail = 30
         for j in stride(from: tail, through: 1, by: -1) {
             let p0 = on(points, u - direction * Double(j) / n), p1 = on(points, u - direction * Double(j - 1) / n)
             let f = 1 - Double(j) / Double(tail)
             var piece = Path()
             piece.move(to: p0)
             piece.addLine(to: p1)
-            g.stroke(piece, with: .color(colour.opacity(0.32 * f * f)), lineWidth: CGFloat(12 * f + 2))
-            g.stroke(piece, with: .color(ThemeFX.mix(colour, .white, CGFloat(f)).opacity(0.9 * f)), lineWidth: CGFloat(1.5 + 3 * f * (1 + level)))
+            g.stroke(piece, with: .color(colour.opacity(0.32 * f * f)), lineWidth: CGFloat(18 * f + 3))
+            g.stroke(piece, with: .color(ThemeFX.mix(colour, .white, CGFloat(f)).opacity(0.9 * f)), lineWidth: CGFloat(2.5 + 4.5 * f * (1 + level)))
         }
         let p = on(points, u)
-        let r = CGFloat(16 + level * 10)
+        let r = CGFloat(26 + level * 14)
         g.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)),
                with: .radialGradient(Gradient(colors: [ThemeFX.mix(colour, .white, 0.6).opacity(0.85), colour.opacity(0)]), center: p, startRadius: 0, endRadius: r))
-        let core = r * 0.32
+        let core = r * 0.38
         g.fill(Path(ellipseIn: CGRect(x: p.x - core, y: p.y - core, width: core * 2, height: core * 2)),
                with: .radialGradient(Gradient(colors: [.white, .white.opacity(0.9), .white.opacity(0)]), center: p, startRadius: 0, endRadius: core))
     }
