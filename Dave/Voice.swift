@@ -56,13 +56,16 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
         return length > 0.3 ? file : nil
     }
 
-    /// Say [text] in [language] ("nl-NL", "en-US"…); returns when done (or stopped).
-    func speak(_ text: String, language: String, rate: Double) async {
+    /// Say [text] in [language] ("nl-NL", "en-US"…), at [rate] with [pitch] (1 = the voice's own) and [volume] (the
+    /// personality and mood); returns when done (or stopped).
+    func speak(_ text: String, language: String, rate: Double, pitch: Double = 1, volume: Double = 1) async {
         stopSpeaking()
         try? prepareAudio()
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = bestVoice(for: language)
-        utterance.rate = Float(rate)
+        utterance.rate = Float(min(Double(AVSpeechUtteranceMaximumSpeechRate), max(Double(AVSpeechUtteranceMinimumSpeechRate), rate)))
+        utterance.pitchMultiplier = Float(pitch)
+        utterance.volume = Float(volume)
         await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
             finishedSpeaking = done
             synthesizer.speak(utterance)

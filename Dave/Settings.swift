@@ -32,6 +32,10 @@ final class Settings: ObservableObject {
     @Published var theme: String { didSet { defaults.set(theme, forKey: "theme") } }
     /// 0.4 (slow) … 0.6 (fast); 0.5 is iOS' normal speed.
     @Published var speechRate: Double { didSet { defaults.set(speechRate, forKey: "speechRate") } }
+    /// How Dave talks and sounds: "normal", "chill", "hyped", "butler" or "sarcastic" (see Personality), like on the PC.
+    @Published var personality: String { didSet { defaults.set(personality, forKey: "personality") } }
+    /// Short sounds in the theme's style when Dave starts and stops listening and when he's done (see ThemeSounds).
+    @Published var themeSounds: Bool { didSet { defaults.set(themeSounds, forKey: "themeSounds") } }
 
     private init() {
         groqKey = defaults.string(forKey: "groqKey") ?? ""
@@ -51,6 +55,8 @@ final class Settings: ObservableObject {
         spotifyAccessToken = defaults.string(forKey: "spotifyAccessToken") ?? ""
         spotifyTokenExpires = defaults.double(forKey: "spotifyTokenExpires")
         speechRate = defaults.object(forKey: "speechRate") as? Double ?? 0.5
+        personality = defaults.string(forKey: "personality") ?? "normal"
+        themeSounds = defaults.object(forKey: "themeSounds") as? Bool ?? true
     }
 
     var hasPC: Bool { !pcAddress.trimmingCharacters(in: .whitespaces).isEmpty && !pcCode.isEmpty }

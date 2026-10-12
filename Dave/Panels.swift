@@ -7,6 +7,9 @@ final class PCData: ObservableObject {
     struct AppTime: Identifiable { var id: String { app }; let app: String; let seconds: Int }
     struct DayTime: Identifiable { var id: String { day }; let day: String; let seconds: Int }
     struct Song: Identifiable { let id = UUID(); let title: String; let artist: String; let at: String }
+    /// A friend in Dave's Social chat (the same friends as on the PC: one friend code for both).
+    struct Friend: Identifiable { var id: String { code }; let code: String; let name: String; let status: String; let unread: Int; let last: String; let lines: [ChatLine] }
+    struct ChatLine: Identifiable { let id = UUID(); let mine: Bool; let text: String; let at: String }
 
     @Published var reminders: [Reminder] = []
     @Published var watching: [String] = []
@@ -17,6 +20,10 @@ final class PCData: ObservableObject {
     @Published var nowPlaying: Song?
     @Published var history: [Song] = []
     @Published var disliked: [Song] = []
+    @Published var friendCode = ""
+    @Published var friends: [Friend] = []
+    /// Something to tell you after a Social change ("Friend request sent"), shown once.
+    @Published var note: String?
     @Published var problem: String?
     @Published var loaded = false
     @Published var updating = false
@@ -74,6 +81,14 @@ final class PCData: ObservableObject {
         nowPlaying = (music?["now"] as? [String: Any]).map(song)
         history = list("history", in: music).map(song)
         disliked = list("disliked", in: music).map(song)
+        let social = json["social"] as? [String: Any]
+        friendCode = social?["code"] as? String ?? friendCode
+        friends = list("friends", in: social).map { f in
+            Friend(code: f["code"] as? String ?? "", name: f["name"] as? String ?? "?", status: f["status"] as? String ?? "",
+                   unread: f["unread"] as? Int ?? 0, last: f["last"] as? String ?? "",
+                   lines: list("lines", in: f).map { ChatLine(mine: $0["mine"] as? Bool ?? false, text: $0["text"] as? String ?? "", at: $0["at"] as? String ?? "") })
+        }
+        if fresh, let note = json["note"] as? String, !note.isEmpty { self.note = note }
         loaded = true
         if fresh {
             problem = nil
@@ -411,6 +426,30 @@ struct ScreenTimePanel: View {
                     }
                 }
             }
+        }
+    }
+}
+
+// MARK: The PC tab: music and screen time
+
+/// What your PC played and how long you used it: two pages in one tab, with a switch at the bottom.
+struct PCTab: View {
+    @ObservedObject var data: PCData
+    @State private var page = 0
+    private let settings = Settings.shared
+
+    var body: some View {
+        Group {
+            if page == 0 { MusicPanel(data: data) } else { ScreenTimePanel(data: data) }
+        }
+        .safeAreaInset(edge: .bottom) {
+            Picker("", selection: $page) {
+                Label(settings.say("Music", "Muziek"), systemImage: "music.note").tag(0)
+                Label(settings.say("Screen time", "Schermtijd"), systemImage: "chart.bar.fill").tag(1)
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 20).padding(.vertical, 8)
+            .background(.ultraThinMaterial)
         }
     }
 }

@@ -129,9 +129,13 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    Picker(settings.say("Personality", "Persoonlijkheid"), selection: $settings.personality) {
+                        ForEach(Personality.all) { p in Text(settings.say(p.name, p.nameDutch)).tag(p.id) }
+                    }
                     Slider(value: $settings.speechRate, in: 0.4...0.6) {
                         Text(settings.say("Speaking speed", "Spreeksnelheid"))
                     } minimumValueLabel: { Image(systemName: "tortoise") } maximumValueLabel: { Image(systemName: "hare") }
+                    Toggle(settings.say("Theme sounds", "Themageluiden"), isOn: $settings.themeSounds)
                 } header: {
                     Text(settings.say("Voice", "Stem"))
                 } footer: {

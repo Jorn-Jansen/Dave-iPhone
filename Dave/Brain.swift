@@ -61,17 +61,28 @@ final class Brain: ObservableObject {
         }
     }
 
-    /// A typed question.
+    /// A typed question. Also while Dave talks, thinks or listens: he stops that and answers this instead.
     func submit(_ text: String) {
-        guard state == .idle || state == .speaking else { return }
-        voice.stopSpeaking()
+        switch state {
+        case .idle: break
+        case .speaking: voice.stopSpeaking()
+        case .listening, .thinking:
+            generation += 1 // the old work notices it was cancelled, and leaves the new one alone
+            work?.cancel()
+            progress = nil
+            if state == .listening { stopRequested = true; _ = voice.stopRecording(); level = 0 }
+            state = .idle
+        }
         work = Task { await ask(text) }
     }
 
+    /// Goes up when Dave is interrupted: work from before that doesn't touch the chat or the state anymore.
+    private var generation = 0
+
     /// Cancelled (tapped the orb while thinking): back to waiting, without an error. Once: the orb already says it right
-    /// away, and the cancelled work says it again when it notices.
-    private func stopped() {
-        guard state == .thinking else { return }
+    /// away, and the cancelled work says it again when it notices. Not when you interrupted him with something new.
+    private func stopped(_ from: Int? = nil) {
+        guard state == .thinking, from == nil || from == generation else { return }
         add(Line(fromUser: false, text: settings.say("⏹ Stopped.", "⏹ Gestopt.")))
         state = .idle
     }
@@ -84,6 +95,11 @@ final class Brain: ObservableObject {
                                                           "Ik mag de microfoon niet gebruiken. Zet hem aan in de iOS-instellingen → Dave.")))
             return
         }
+        let mine = generation
+        // The theme's "listening" sound first, so it isn't recorded
+        let sound = ThemeSounds.play(.listen)
+        if sound > 0 { try? await Task.sleep(nanoseconds: UInt64(sound * 1_000_000_000)) }
+        if Task.isCancelled { return }
         do { try voice.startRecording() } catch {
             add(Line(fromUser: false, text: settings.say("The microphone didn't start.", "De microfoon startte niet.")))
             return
@@ -105,17 +121,19 @@ final class Brain: ObservableObject {
             if now.timeIntervalSince(started) > 20 { break }
         }
         level = 0
+        if generation != mine { return } // you typed something instead: that's being answered now
         guard let recording = finishListening() else { state = .idle; return }
         state = .thinking
         do {
             let (text, language) = try await Groq.transcribe(recording, settings: settings)
+            if generation != mine { return }
             guard !text.isEmpty else {
                 state = .idle
                 return
             }
             await ask(text, language: languageTag(whisper: language))
         } catch {
-            if Task.isCancelled { stopped(); return }
+            if Task.isCancelled { stopped(mine); return }
             await answer(error.localizedDescription, language: settings.language)
         }
     }
@@ -124,7 +142,7 @@ final class Brain: ObservableObject {
     private func finishListening() -> URL? {
         stopRequested = true
         let recording = voice.stopRecording()
-        if recording != nil { Haptics.heard() }
+        if recording != nil { Haptics.heard(); ThemeSounds.play(.heard) }
         return recording
     }
 
@@ -142,6 +160,7 @@ final class Brain: ObservableObject {
     func ask(_ text: String, language: String? = nil) async {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { state = .idle; return } // (busy is checked by the callers: listen() is already "thinking" here)
+        let mine = generation // (interrupted later: leave the chat to the new question)
         let language = language ?? settings.language
         add(Line(fromUser: true, text: text))
         state = .thinking
@@ -152,16 +171,17 @@ final class Brain: ObservableObject {
 
         do {
             let message = try await Groq.chat(messages: messages, tools: tools, settings: settings)
-            if Task.isCancelled { stopped(); return } // stopped while the AI was answering: ignore its answer
+            if Task.isCancelled { stopped(mine); return } // stopped while the AI was answering: ignore its answer
             if let calls = message["tool_calls"] as? [[String: Any]], let call = calls.first,
                let function = call["function"] as? [String: Any], let name = function["name"] as? String {
                 let argumentText = function["arguments"] as? String ?? "{}"
                 let arguments = (try? JSONSerialization.jsonObject(with: Data(argumentText.utf8)) as? [String: Any]) ?? [:]
                 let id = call["id"] as? String ?? UUID().uuidString
                 let (reply, images) = try await run(name, arguments, question: text, language: language)
-                if Task.isCancelled { stopped(); return }
+                if Task.isCancelled { stopped(mine); return }
                 remember(text, toolCall: (id, name, argumentText), result: reply.isEmpty ? "Done." : reply)
                 if reply.isEmpty { // an app opened: nothing to say
+                    ThemeSounds.play(.done)
                     add(Line(fromUser: false, text: "↗ " + (arguments["app"] as? String ?? arguments["name"] as? String ?? "")))
                     state = .idle
                 } else {
@@ -174,7 +194,7 @@ final class Brain: ObservableObject {
                 await answer(said, language: language)
             }
         } catch {
-            if Task.isCancelled { stopped(); return }
+            if Task.isCancelled { stopped(mine); return }
             await answer(error.localizedDescription, language: language)
         }
     }
@@ -184,11 +204,76 @@ final class Brain: ObservableObject {
         let context = "[It's \(now()). Answer in \(language.hasPrefix("nl") ? "Dutch" : "English").]"
         var messages: [[String: Any]] = [["role": "system", "content": systemPrompt()]]
         messages += history
-        messages.append(["role": "user", "content": "\(context)\n\n\(text)"])
+        messages.append(["role": "user", "content": "\(context)\n\n\(text)\(Personality.nudge)"])
         return messages
     }
 
-    private var tools: [[String: Any]] { PhoneTools.definitions + (settings.hasPC ? [pcControlTool, pcTool] : []) }
+    private var tools: [[String: Any]] { PhoneTools.definitions + [settingsTool] + (settings.hasPC ? [pcControlTool, pcTool] : []) }
+
+    /// "Switch to the ember theme", "be a butler", "talk faster": Dave changes his own settings on the phone.
+    private var settingsTool: [String: Any] {
+        [
+            "type": "function",
+            "function": [
+                "name": "change_setting",
+                "description": "Change one of your own settings in this iPhone app when the user asks: the theme ('switch to the ember theme'), "
+                    + "the personality ('be a butler', 'act normal again'), your name ('call yourself Jarvis'), how fast you talk, the main language, "
+                    + "theme sounds on or off, or the country. Themes: " + Theme.all.map(\.id).joined(separator: ", ")
+                    + ". Personalities: " + Personality.all.map(\.id).joined(separator: ", ") + ". For settings of Dave on the PC, use pc.",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "setting": ["type": "string", "enum": ["theme", "personality", "name", "speech_speed", "language", "theme_sounds", "country"]],
+                        "value": ["type": "string", "description": "A theme or personality id, a name, slow/normal/faster/fast, nl-NL or en-US, on/off, or a country"],
+                    ],
+                    "required": ["setting", "value"],
+                ] as [String: Any],
+            ] as [String: Any],
+        ]
+    }
+
+    private func changeSetting(_ args: [String: Any]) -> String {
+        let value = (args["value"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+        let lower = value.lowercased()
+        switch args["setting"] as? String ?? "" {
+        case "theme":
+            guard let theme = Theme.all.first(where: { $0.id == lower || $0.name.lowercased() == lower }) else {
+                return settings.say("I don't have that theme. Pick one of: \(Theme.all.map(\.name).joined(separator: ", ")).",
+                                    "Dat thema heb ik niet. Kies uit: \(Theme.all.map(\.name).joined(separator: ", ")).")
+            }
+            settings.theme = theme.id
+            return settings.say("Switched to the \(theme.name) theme.", "Ik ben overgestapt op het thema \(theme.name).")
+        case "personality":
+            let p = Personality.named(lower)
+            settings.personality = p.id
+            return settings.say(p.hello, p.helloDutch)
+        case "name":
+            guard !value.isEmpty, value.count <= 30 else { return settings.say("What should my name be?", "Hoe moet ik heten?") }
+            settings.name = value
+            return settings.say("From now on I'm \(value).", "Vanaf nu heet ik \(value).")
+        case "speech_speed":
+            let speeds: [String: Double] = ["slow": 0.44, "slower": 0.44, "langzaam": 0.44, "langzamer": 0.44, "normal": 0.5, "normaal": 0.5,
+                                            "faster": 0.54, "sneller": 0.54, "fast": 0.58, "snel": 0.58]
+            guard let speed = speeds[lower] else { return settings.say("How fast: slow, normal, faster or fast?", "Hoe snel: langzaam, normaal, sneller of snel?") }
+            settings.speechRate = speed
+            return settings.say("Okay, I'll talk \(lower == "normal" ? "at normal speed" : lower) from now on.", "Oké, ik praat vanaf nu \(lower).")
+        case "language":
+            let tag = lower.hasPrefix("nl") || lower.contains("dutch") || lower.contains("neder") ? "nl-NL" : lower.hasPrefix("en") ? "en-US" : ""
+            guard !tag.isEmpty else { return settings.say("I speak Dutch and English here.", "Ik spreek hier Nederlands en Engels.") }
+            settings.language = tag
+            return tag == "nl-NL" ? "Oké, ik praat vanaf nu Nederlands." : "Okay, I'll speak English from now on."
+        case "theme_sounds":
+            let on = ["on", "true", "yes", "aan", "ja"].contains(lower)
+            settings.themeSounds = on
+            return on ? settings.say("Theme sounds are on.", "Themageluiden staan aan.") : settings.say("Theme sounds are off.", "Themageluiden staan uit.")
+        case "country":
+            guard !value.isEmpty else { return settings.say("Which country?", "Welk land?") }
+            settings.country = value
+            return settings.say("Okay, I'll use \(value) for units and local results.", "Oké, ik gebruik \(value) voor eenheden en lokale resultaten.")
+        default:
+            return settings.say("I can't change that one myself; it's in ⚙.", "Die kan ik zelf niet veranderen; die staat in ⚙.")
+        }
+    }
 
     /// For Siri ("Hey Siri, ask Dave…"): the same thinking, without the screen or Dave's voice (Siri says it). Returns the answer.
     func reply(to text: String) async -> String {
@@ -242,6 +327,7 @@ final class Brain: ObservableObject {
                 return (error.localizedDescription, [])
             }
 
+        case "change_setting": return (changeSetting(args), [])
         case "music": return (try await PhoneTools.music(args, settings: settings), [])
 
         case "phone_reminder":
@@ -376,7 +462,8 @@ final class Brain: ObservableObject {
         add(Line(fromUser: false, text: text, viaPC: viaPC, images: images))
         Haptics.answer()
         state = .speaking
-        await voice.speak(text, language: language, rate: settings.speechRate)
+        let sound = Personality.voice() // the personality, and the mood of this answer
+        await voice.speak(text, language: language, rate: settings.speechRate * sound.rate, pitch: sound.pitch, volume: sound.volume)
         state = .idle
         // Dave asked something back: listen for the answer without another tap
         if text.trimmingCharacters(in: .whitespaces).hasSuffix("?") && !viaPC {
@@ -429,7 +516,8 @@ final class Brain: ObservableObject {
                 "name": "pc",
                 "description": "Ask Dave on the user's Windows PC to do or find out something there: its music or Spotify, volume, "
                     + "opening or closing programs and websites, locking it, files, what's on its screen, timers and reminders on the PC, "
-                    + "its notifications and messages, screen time, how the PC is doing, the page open in its browser, game help.",
+                    + "its notifications and messages, screen time, how the PC is doing or why a game lags, the page open in its browser, game help, "
+                    + "chatting with friends who use Dave ('tell Alex I'm online', 'any messages?'), and Dave's settings on the PC.",
                 "parameters": [
                     "type": "object",
                     "properties": ["request": ["type": "string", "description": "The request as the user would say it to Dave on the PC, e.g. 'pause the music'"]],
@@ -440,7 +528,8 @@ final class Brain: ObservableObject {
     }
 
     private func systemPrompt() -> String {
-        var prompt = """
+        var prompt = Personality.instruction + "\n\n" // first, so it colours everything below
+        prompt += """
         You are \(settings.displayName), a voice assistant in an app on the user's iPhone. Everything you say is read aloud, so:
         answer in one to three short spoken sentences unless they ask for more; plain speech only: no markdown, lists, emojis, links or symbols;
         say numbers, times and units the way a person says them. Use web search for anything current: news, weather, scores, prices, opening hours.
@@ -489,7 +578,7 @@ final class Brain: ObservableObject {
 
     /// No markdown or links read aloud.
     private func speakable(_ text: String) -> String {
-        var t = text
+        var t = Personality.takeMood(text) // "[whisper] …": for how it's said, not read out
         t = t.replacingOccurrences(of: #"\[([^\]]+)\]\([^)]+\)"#, with: "$1", options: .regularExpression) // [text](link) → text
         t = t.replacingOccurrences(of: #"https?://\S+"#, with: "", options: .regularExpression)
         t = t.replacingOccurrences(of: #"[*_#`>]+"#, with: "", options: .regularExpression)

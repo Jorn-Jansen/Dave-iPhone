@@ -25,7 +25,8 @@ struct DaveApp: App {
     }
 }
 
-/// The tabs, like the ones in Dave's window on the PC: chat, reminders, memories, music and screen time.
+/// The tabs, like the ones in Dave's window on the PC: chat, social, reminders, memories, and the PC's music and screen
+/// time (sharing a tab: iPhones show at most five).
 struct RootView: View {
     @ObservedObject private var settings = Settings.shared
     @StateObject private var data = PCData()
@@ -35,14 +36,15 @@ struct RootView: View {
         TabView(selection: $tab) {
             ContentView()
                 .tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right.fill") }.tag(0)
+            SocialPanel(data: data)
+                .tabItem { Label(settings.say("Social", "Sociaal"), systemImage: "person.2.fill") }.tag(1)
+                .badge(data.friends.reduce(0) { $0 + $1.unread + ($1.status == "incoming" ? 1 : 0) })
             RemindersPanel(data: data)
-                .tabItem { Label(settings.say("Reminders", "Herinneringen"), systemImage: "alarm.fill") }.tag(1)
+                .tabItem { Label(settings.say("Reminders", "Herinneringen"), systemImage: "alarm.fill") }.tag(2)
             MemoriesPanel(data: data)
-                .tabItem { Label(settings.say("Memories", "Geheugen"), systemImage: "brain.head.profile") }.tag(2)
-            MusicPanel(data: data)
-                .tabItem { Label(settings.say("Music", "Muziek"), systemImage: "music.note") }.tag(3)
-            ScreenTimePanel(data: data)
-                .tabItem { Label(settings.say("Screen time", "Schermtijd"), systemImage: "chart.bar.fill") }.tag(4)
+                .tabItem { Label(settings.say("Memories", "Geheugen"), systemImage: "brain.head.profile") }.tag(3)
+            PCTab(data: data)
+                .tabItem { Label("PC", systemImage: "desktopcomputer") }.tag(4)
         }
         .tint(.davePurple)
         .toolbarBackground(.ultraThinMaterial, for: .tabBar)
