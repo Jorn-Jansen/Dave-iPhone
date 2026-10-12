@@ -8,7 +8,7 @@ final class PCData: ObservableObject {
     struct DayTime: Identifiable { var id: String { day }; let day: String; let seconds: Int }
     struct Song: Identifiable { let id = UUID(); let title: String; let artist: String; let at: String }
     /// A friend in Dave's Social chat (the same friends as on the PC: one friend code for both).
-    struct Friend: Identifiable { var id: String { code }; let code: String; let name: String; let status: String; let unread: Int; let last: String; let lines: [ChatLine] }
+    struct Friend: Identifiable { var id: String { code }; let code: String; let name: String; let status: String; let unread: Int; let last: String; let secure: Bool; let lines: [ChatLine] }
     struct ChatLine: Identifiable { let id = UUID(); let mine: Bool; let text: String; let at: String }
 
     @Published var reminders: [Reminder] = []
@@ -85,7 +85,7 @@ final class PCData: ObservableObject {
         friendCode = social?["code"] as? String ?? friendCode
         friends = list("friends", in: social).map { f in
             Friend(code: f["code"] as? String ?? "", name: f["name"] as? String ?? "?", status: f["status"] as? String ?? "",
-                   unread: f["unread"] as? Int ?? 0, last: f["last"] as? String ?? "",
+                   unread: f["unread"] as? Int ?? 0, last: f["last"] as? String ?? "", secure: f["secure"] as? Bool ?? false,
                    lines: list("lines", in: f).map { ChatLine(mine: $0["mine"] as? Bool ?? false, text: $0["text"] as? String ?? "", at: $0["at"] as? String ?? "") })
         }
         if fresh, let note = json["note"] as? String, !note.isEmpty { self.note = note }

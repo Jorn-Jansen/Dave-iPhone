@@ -157,6 +157,10 @@ private struct ChatView: View {
                 ScrollViewReader { scroll in
                     ScrollView {
                         LazyVStack(spacing: 10) {
+                            Text(friend?.secure == true
+                                 ? settings.say("🔒 End-to-end encrypted: only you two can read this", "🔒 End-to-end versleuteld: alleen jullie tweeën kunnen dit lezen")
+                                 : settings.say("⚠️ Not encrypted yet: they need the latest Dave", "⚠️ Nog niet versleuteld: ze hebben de nieuwste Dave nodig"))
+                                .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
                             if friend?.lines.isEmpty ?? true {
                                 Text(settings.say("No messages yet. Say hi!", "Nog geen berichten. Zeg hoi!")).foregroundStyle(.secondary).padding(.top, 40)
                             }
