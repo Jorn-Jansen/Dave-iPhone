@@ -36,6 +36,8 @@ final class SocialChat: ObservableObject {
         var failed: Bool?
         var myReaction: String?
         var theirReaction: String?
+        /// The id of the message this one replies to.
+        var replyTo: String?
     }
 
     @Published private(set) var code = ""
@@ -142,7 +144,7 @@ final class SocialChat: ObservableObject {
             // A copy of what you sent from the PC
             guard let me = privateKey, let inner = open(m, from: code, key: me.publicKey), inner["type"] as? String == "sent",
                   inner["by"] as? String != "iphone", let to = inner["to"] as? String, fresh(inner) else { return }
-            add(to, Line(mine: true, text: inner["text"] as? String ?? "", at: Self.now()))
+            add(to, Line(mine: true, text: inner["text"] as? String ?? "", at: Self.now(), msgId: inner["msgid"] as? String, replyTo: Self.reply(inner)))
             return
         }
         guard let index = friends.firstIndex(where: { $0.code == from && $0.status == "friend" && !$0.key.isEmpty }),
@@ -153,13 +155,13 @@ final class SocialChat: ObservableObject {
         case "msg":
             guard let text = inner["text"] as? String, !text.isEmpty else { return }
             typing[from] = nil
-            add(from, Line(mine: false, text: String(text.prefix(1000)), at: Self.now(), msgId: id))
+            add(from, Line(mine: false, text: String(text.prefix(1000)), at: Self.now(), msgId: id, replyTo: Self.reply(inner)))
             friends[index].unread += 1
         case "file":
             typing[from] = nil
             let kind = ["voice", "photo", "video"].contains(inner["kind"] as? String ?? "") ? inner["kind"] as! String : "file"
             let fileName = Self.safeName(inner["filename"] as? String ?? "file")
-            add(from, Line(mine: false, text: Self.label(kind, fileName), at: Self.now(), msgId: id, kind: kind, name: fileName))
+            add(from, Line(mine: false, text: Self.label(kind, fileName), at: Self.now(), msgId: id, kind: kind, name: fileName, replyTo: Self.reply(inner)))
             friends[index].unread += 1
             Task { await download(inner, from: from, id: id ?? UUID().uuidString, name: fileName) }
         case "react":
@@ -200,17 +202,17 @@ final class SocialChat: ObservableObject {
     // MARK: Sending
 
     /// Sends [text] to a friend, encrypted; nil when it went, otherwise why not.
-    func send(_ text: String, to friendCode: String, settings: Settings) async -> String? {
+    func send(_ text: String, to friendCode: String, reply: String? = nil, settings: Settings) async -> String? {
         let text = String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(1000))
         guard !text.isEmpty, let me = privateKey else { return settings.say("Connect me to your PC once (⚙) to chat.", "Koppel me één keer aan je pc (⚙) om te chatten.") }
         guard let theirs = friendKey(friendCode) else { return needsUpdate(settings) }
-        guard let sealed = sealWithId(["type": "msg", "text": text], to: friendCode, key: theirs),
+        guard let sealed = sealWithId(["type": "msg", "text": text, "reply": reply ?? ""], to: friendCode, key: theirs),
               await post(sealed.message, to: friendCode) else { return didntGo(settings) }
-        add(friendCode, Line(mine: true, text: text, at: Self.now(), msgId: sealed.id))
+        add(friendCode, Line(mine: true, text: text, at: Self.now(), msgId: sealed.id, replyTo: reply))
         typingSent[friendCode] = nil // the next "typing…" goes right away
         save()
         // A copy for your PC (sealed with your own key), so it's in the chat there too
-        if let copy = sealWithId(["type": "sent", "to": friendCode, "text": text, "by": "iphone"], to: code, key: me.publicKey) {
+        if let copy = sealWithId(["type": "sent", "to": friendCode, "text": text, "by": "iphone", "msgid": sealed.id ?? "", "reply": reply ?? ""], to: code, key: me.publicKey) {
             if let id = copy.id { seen.insert(id) }
             _ = await post(copy.message, to: code)
         }
@@ -219,7 +221,7 @@ final class SocialChat: ObservableObject {
 
     /// Sends a voice message, photo, video or file: locked with its own key, put on the file host, and the end-to-end
     /// encrypted message says where it is and how to unlock it. Nil when it went, otherwise why not.
-    func sendFile(_ data: Data, name: String, kind: String? = nil, to friendCode: String, settings: Settings) async -> String? {
+    func sendFile(_ data: Data, name: String, kind: String? = nil, to friendCode: String, reply: String? = nil, settings: Settings) async -> String? {
         guard ready else { return settings.say("Connect me to your PC once (⚙) to chat.", "Koppel me één keer aan je pc (⚙) om te chatten.") }
         guard let theirs = friendKey(friendCode) else { return needsUpdate(settings) }
         guard !data.isEmpty, data.count <= 200_000_000 else { return settings.say("That's too big to send (200 MB at most).", "Dat is te groot om te versturen (hooguit 200 MB).") }
@@ -234,11 +236,12 @@ final class SocialChat: ObservableObject {
         let inner: [String: Any] = [
             "type": "file", "kind": kind, "filename": name, "size": data.count, "url": url, "id": id,
             "k": key.withUnsafeBytes { Data($0) }.base64EncodedString(), "fn": box.nonce.withUnsafeBytes { Data($0) }.base64EncodedString(),
+            "reply": reply ?? "",
         ]
         guard let sealed = sealWithId(inner, to: friendCode, key: theirs), await post(sealed.message, to: friendCode) else { return didntGo(settings) }
         let kept = id + "." + (name as NSString).pathExtension
         try? data.write(to: Self.filesFolder.appendingPathComponent(kept))
-        add(friendCode, Line(mine: true, text: Self.label(kind, name), at: Self.now(), msgId: id, kind: kind, name: name, file: kept))
+        add(friendCode, Line(mine: true, text: Self.label(kind, name), at: Self.now(), msgId: id, kind: kind, name: name, file: kept, replyTo: reply))
         save()
         return nil
     }
@@ -324,6 +327,12 @@ final class SocialChat: ObservableObject {
         if let kept { lines[at].file = kept } else { lines[at].failed = true }
         chats[friendCode] = lines
         save()
+    }
+
+    /// The id of the message a sealed one replies to (nil for none).
+    private static func reply(_ inner: [String: Any]) -> String? {
+        guard let reply = inner["reply"] as? String, !reply.isEmpty, reply.count <= 64 else { return nil }
+        return reply
     }
 
     static func kind(of name: String) -> String {

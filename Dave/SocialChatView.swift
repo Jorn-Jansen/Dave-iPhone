@@ -15,6 +15,9 @@ struct ChatView: View {
     @State private var pickingPhotos = false
     @State private var pickingFile = false
     @State private var shown: URL? // a photo opened full screen
+    @State private var replying: SocialChat.Line? // what you send next replies to this
+    @State private var jumpTo: UUID?   // a message to scroll to (tapping a reply's quote)
+    @State private var flashing: UUID? // and to light up for a moment
     @StateObject private var recorder = VoiceNoteRecorder()
     private let settings = Settings.shared
     private static let reactions = ["👍", "❤️", "😂", "😮", "😢", "🔥"]
@@ -45,7 +48,15 @@ struct ChatView: View {
                     .onAppear { scrollDown(scroll) }
                     .onChange(of: lines.count) { _ in withAnimation { scrollDown(scroll) } }
                     .onChange(of: chat.isTyping(code)) { _ in withAnimation { scrollDown(scroll) } }
+                    .onChange(of: jumpTo) { target in
+                        guard let target else { return }
+                        withAnimation { scroll.scrollTo(target, anchor: .center) }
+                        flashing = target
+                        jumpTo = nil
+                        Task { try? await Task.sleep(nanoseconds: 1_400_000_000); withAnimation { flashing = nil } }
+                    }
                 }
+                if let replying { replyBar(replying) }
                 composer
             }
         }
@@ -71,6 +82,7 @@ struct ChatView: View {
         HStack {
             if line.mine { Spacer(minLength: 50) }
             VStack(alignment: line.mine ? .trailing : .leading, spacing: 4) {
+                if let target = line.replyTo { quote(target) }
                 content(line)
                 Text(line.at).font(.caption2).opacity(0.6).padding(.horizontal, line.kind == nil ? 0 : 6)
             }
@@ -80,6 +92,8 @@ struct ChatView: View {
                         : AnyShapeStyle(.ultraThinMaterial),
                         in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay(alignment: line.mine ? .bottomLeading : .bottomTrailing) { reactionChip(line) }
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Color.daveCyan, lineWidth: flashing == line.id ? 2.5 : 0)
+                        .shadow(color: .daveCyan, radius: flashing == line.id ? 12 : 0))
             .contextMenu { menu(line) }
             if !line.mine { Spacer(minLength: 50) }
         }
@@ -96,6 +110,9 @@ struct ChatView: View {
     }
 
     @ViewBuilder private func menu(_ line: SocialChat.Line) -> some View {
+        if line.msgId != nil && !(friend?.key.isEmpty ?? true) {
+            Button { replying = line } label: { Label(settings.say("Reply", "Beantwoorden"), systemImage: "arrowshape.turn.up.left") }
+        }
         if line.msgId != nil && !(friend?.key.isEmpty ?? true) {
             ForEach(Self.reactions, id: \.self) { emoji in
                 Button(emoji + (line.myReaction == emoji ? " ✓" : "")) { Task { await chat.react(emoji, to: line, of: code) } }
@@ -169,6 +186,39 @@ struct ChatView: View {
         .padding(.horizontal, 12).padding(.vertical, 10)
     }
 
+    /// A small version of the message a reply is about; tap it to see that message.
+    @ViewBuilder private func quote(_ target: String) -> some View {
+        let original = lines.first { $0.msgId == target }
+        Button { if let original { jumpTo = original.id } } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.turn.up.right").font(.caption2)
+                if let original { Text(original.mine ? settings.say("You", "Jij") : friend?.name ?? "").font(.caption.bold()) }
+                Text(original.map(snippet) ?? settings.say("a message that's no longer here", "een bericht dat er niet meer is")).font(.caption).lineLimit(1)
+            }
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .frame(maxWidth: 230, alignment: .leading)
+            .background(Color.black.opacity(0.2), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(alignment: .leading) { Rectangle().fill(Color.daveCyan.opacity(0.8)).frame(width: 2) }
+            .opacity(0.85)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// "Replying to Alex: …" above the box, with ✕.
+    private func replyBar(_ line: SocialChat.Line) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "arrowshape.turn.up.left").font(.caption)
+            Text(settings.say("Replying to", "Antwoord op")).font(.caption)
+            Text(line.mine ? settings.say("You", "Jij") : friend?.name ?? "").font(.caption.bold())
+            Text(snippet(line)).font(.caption).lineLimit(1).foregroundStyle(.secondary)
+            Spacer()
+            Button { replying = nil } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+        }
+        .padding(.horizontal, 18).padding(.top, 6)
+    }
+
+    private func snippet(_ line: SocialChat.Line) -> String { line.text.count > 90 ? String(line.text.prefix(90)) + "…" : line.text }
+
     private var placeholder: String {
         if recorder.recording { return settings.say("🎤 Recording… tap ■ to send", "🎤 Opnemen… tik ■ om te versturen") }
         if sending { return settings.say("Sending…", "Versturen…") }
@@ -184,7 +234,9 @@ struct ChatView: View {
         let text = typed.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         typed = ""
-        Task { problem = await chat.send(text, to: code, settings: settings) }
+        let reply = replying?.msgId
+        replying = nil
+        Task { problem = await chat.send(text, to: code, reply: reply, settings: settings) }
     }
 
     /// 🎤: tap to start, tap ■ to stop and send.
@@ -219,7 +271,9 @@ struct ChatView: View {
 
     private func sendData(_ data: Data, name: String, kind: String?) async {
         sending = true
-        problem = await chat.sendFile(data, name: name, kind: kind, to: code, settings: settings)
+        let reply = replying?.msgId
+        replying = nil
+        problem = await chat.sendFile(data, name: name, kind: kind, to: code, reply: reply, settings: settings)
         sending = false
     }
 }
