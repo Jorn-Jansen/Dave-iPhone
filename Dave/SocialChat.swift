@@ -19,12 +19,32 @@ final class SocialChat: ObservableObject {
         var status: String
         var key: String
         var unread = 0
+        /// Your last message they've read, and when ("Seen 21:46").
+        var seenId: String?
+        var seenAt: String?
+    }
+
+    /// A message you scheduled ("send it tomorrow at 8"): sent then, when Dave is open (or the next time he is).
+    struct Scheduled: Codable, Identifiable {
+        var id = UUID().uuidString
+        let code: String
+        let text: String
+        var reply: String?
+        let at: Date
+    }
+
+    /// A link's page: title, text and picture.
+    struct Preview: Codable {
+        let url: String
+        var title = ""
+        var text = ""
+        var image = ""
     }
 
     struct Line: Codable, Identifiable {
         var id = UUID()
         let mine: Bool
-        let text: String
+        var text: String
         let at: String
         // (optional, so chats saved before these existed still load)
         /// The message's id, for reactions.
@@ -38,6 +58,15 @@ final class SocialChat: ObservableObject {
         var theirReaction: String?
         /// The id of the message this one replies to.
         var replyTo: String?
+        /// When it was sent (for searching by date).
+        var date: Date? = Date()
+        var edited: Bool?
+        /// What's said in a voice message ("…" while it's being worked out).
+        var transcript: String?
+        /// A friend's message in your language ("…" while working on it, "=" when it already was).
+        var translation: String?
+        /// The first link's page (url "-" when there's nothing to show).
+        var preview: Preview?
     }
 
     @Published private(set) var code = ""
@@ -45,11 +74,13 @@ final class SocialChat: ObservableObject {
     @Published private(set) var chats: [String: [Line]] = [:]
     /// When each friend last said they're typing (shown for a few seconds).
     @Published private(set) var typing: [String: Date] = [:]
+    @Published private(set) var scheduled: [Scheduled] = []
     private var name = ""
     private var secret = "" // your private key (the raw 32 bytes, base64), the same as the PC's
     private var since = ""  // the last message seen in your channel
     private var seen = Set<String>()
     private var typingSent: [String: Date] = [:]
+    private var seenSent: [String: String] = [:]
 
     var ready: Bool { privateKey != nil }
     var unread: Int { friends.reduce(0) { $0 + $1.unread } }
@@ -63,6 +94,7 @@ final class SocialChat: ObservableObject {
         var code, name, secret, since: String
         var friends: [Friend]
         var chats: [String: [Line]]
+        var scheduled: [Scheduled]?
     }
 
     private static var folder: URL {
@@ -86,10 +118,11 @@ final class SocialChat: ObservableObject {
     private init() {
         guard let data = try? Data(contentsOf: Self.file), let saved = try? JSONDecoder().decode(Saved.self, from: data) else { return }
         (code, name, secret, since, friends, chats) = (saved.code, saved.name, saved.secret, saved.since, saved.friends, saved.chats)
+        scheduled = saved.scheduled ?? []
     }
 
     private func save() {
-        let saved = Saved(code: code, name: name, secret: secret, since: since, friends: friends, chats: chats)
+        let saved = Saved(code: code, name: name, secret: secret, since: since, friends: friends, chats: chats, scheduled: scheduled)
         if let data = try? JSONEncoder().encode(saved) { try? data.write(to: Self.file, options: [.atomic, .completeFileProtection]) }
     }
 
@@ -104,8 +137,9 @@ final class SocialChat: ObservableObject {
         let list = (identity["friends"] as? [[String: Any]]) ?? []
         friends = list.map { f in
             let code = f["code"] as? String ?? ""
+            let known = friends.first { $0.code == code }
             return Friend(code: code, name: f["name"] as? String ?? "?", status: f["status"] as? String ?? "", key: f["key"] as? String ?? "",
-                          unread: friends.first { $0.code == code }?.unread ?? 0)
+                          unread: known?.unread ?? 0, seenId: known?.seenId, seenAt: known?.seenAt)
         }
         for f in pcFriends where (chats[f.code] ?? []).isEmpty && !f.lines.isEmpty {
             chats[f.code] = f.lines.map { Line(mine: $0.mine, text: $0.text, at: $0.at) }
@@ -141,10 +175,23 @@ final class SocialChat: ObservableObject {
         guard let m = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any], m["c"] != nil,
               let from = m["from"] as? String else { return } // (requests and accepts: the PC takes care of those)
         if from == code {
-            // A copy of what you sent from the PC
-            guard let me = privateKey, let inner = open(m, from: code, key: me.publicKey), inner["type"] as? String == "sent",
+            // A copy of what you did on the PC: sent, changed or deleted a message
+            guard let me = privateKey, let inner = open(m, from: code, key: me.publicKey),
                   inner["by"] as? String != "iphone", let to = inner["to"] as? String, fresh(inner) else { return }
-            add(to, Line(mine: true, text: inner["text"] as? String ?? "", at: Self.now(), msgId: inner["msgid"] as? String, replyTo: Self.reply(inner)))
+            let target = inner["target"] as? String ?? ""
+            switch inner["type"] as? String {
+            case "sent":
+                let line = Line(mine: true, text: inner["text"] as? String ?? "", at: Self.now(), msgId: inner["msgid"] as? String, replyTo: Self.reply(inner))
+                add(to, line)
+                if let id = line.msgId { Task { await preview(id, of: to, mine: true) } }
+            case "edit":
+                change(to, target, mine: true) { $0.text = String((inner["text"] as? String ?? "").prefix(1000)); $0.edited = true; $0.preview = nil }
+                Task { await preview(target, of: to, mine: true) }
+            case "unsend":
+                remove(to, target, mine: true)
+            default:
+                break
+            }
             return
         }
         guard let index = friends.firstIndex(where: { $0.code == from && $0.status == "friend" && !$0.key.isEmpty }),
@@ -157,6 +204,11 @@ final class SocialChat: ObservableObject {
             typing[from] = nil
             add(from, Line(mine: false, text: String(text.prefix(1000)), at: Self.now(), msgId: id, replyTo: Self.reply(inner)))
             friends[index].unread += 1
+            if let id {
+                Task { await preview(id, of: from, mine: false) }
+                let settings = Settings.shared
+                if settings.translate && settings.translateAutomatically { Task { await translate(id, of: from, settings: settings) } }
+            }
         case "file":
             typing[from] = nil
             let kind = ["voice", "photo", "video"].contains(inner["kind"] as? String ?? "") ? inner["kind"] as! String : "file"
@@ -169,6 +221,18 @@ final class SocialChat: ObservableObject {
             let emoji = String((inner["emoji"] as? String ?? "").prefix(8))
             lines[at].theirReaction = emoji.isEmpty ? nil : emoji
             chats[from] = lines
+        case "edit": // they changed a message they sent
+            let target = inner["target"] as? String ?? ""
+            change(from, target, mine: false) { $0.text = String((inner["text"] as? String ?? "").prefix(1000)); $0.edited = true; $0.translation = nil; $0.preview = nil }
+            Task { await preview(target, of: from, mine: false) }
+            let settings = Settings.shared
+            if settings.translate && settings.translateAutomatically { Task { await translate(target, of: from, settings: settings) } }
+        case "unsend": // they deleted a message they sent
+            remove(from, inner["target"] as? String ?? "", mine: false)
+        case "seen": // they've read your messages up to this one
+            guard Settings.shared.readReceipts, let target = inner["target"] as? String, !target.isEmpty else { return }
+            friends[index].seenId = target
+            friends[index].seenAt = Self.now()
         case "typing":
             typing[from] = Date()
         case "bye":
@@ -194,6 +258,27 @@ final class SocialChat: ObservableObject {
 
     func markRead(_ friend: String) {
         if let index = friends.firstIndex(where: { $0.code == friend }), friends[index].unread > 0 { friends[index].unread = 0; save() }
+        // and tells them you've seen their messages (unless read receipts are off)
+        guard Settings.shared.readReceipts, let last = chats[friend]?.last(where: { !$0.mine && $0.msgId != nil })?.msgId,
+              seenSent[friend] != last, let theirs = friendKey(friend) else { return }
+        seenSent[friend] = last
+        Task { if let sealed = sealWithId(["type": "seen", "target": last], to: friend, key: theirs) { _ = await post(sealed.message, to: friend) } }
+    }
+
+    /// Changes the line with message id [id] (yours or theirs) in a chat.
+    private func change(_ friend: String, _ id: String, mine: Bool, _ edit: (inout Line) -> Void) {
+        guard !id.isEmpty, var lines = chats[friend], let at = lines.lastIndex(where: { $0.msgId == id && $0.mine == mine }) else { return }
+        edit(&lines[at])
+        chats[friend] = lines
+        save()
+    }
+
+    private func remove(_ friend: String, _ id: String, mine: Bool) {
+        guard !id.isEmpty, var lines = chats[friend], let at = lines.lastIndex(where: { $0.msgId == id && $0.mine == mine }) else { return }
+        if let file = Self.url(of: lines[at]) { try? FileManager.default.removeItem(at: file) }
+        lines.remove(at: at)
+        chats[friend] = lines
+        save()
     }
 
     /// Whether [friend] is typing right now.
@@ -211,6 +296,7 @@ final class SocialChat: ObservableObject {
         add(friendCode, Line(mine: true, text: text, at: Self.now(), msgId: sealed.id, replyTo: reply))
         typingSent[friendCode] = nil // the next "typing…" goes right away
         save()
+        if let id = sealed.id { Task { await preview(id, of: friendCode, mine: true) } }
         // A copy for your PC (sealed with your own key), so it's in the chat there too
         if let copy = sealWithId(["type": "sent", "to": friendCode, "text": text, "by": "iphone", "msgid": sealed.id ?? "", "reply": reply ?? ""], to: code, key: me.publicKey) {
             if let id = copy.id { seen.insert(id) }
@@ -289,6 +375,148 @@ final class SocialChat: ObservableObject {
         if !keep { request.setValue("no", forHTTPHeaderField: "Cache") } // only matters right now
         guard let (_, response) = try? await URLSession.shared.data(for: request) else { return false }
         return (response as? HTTPURLResponse)?.statusCode == 200
+    }
+
+    // MARK: Edit, delete, schedule
+
+    /// Changes a message you sent, for them too (and on your PC). Nil when it went, otherwise why not.
+    func edit(_ line: Line, to newText: String, of friendCode: String, settings: Settings) async -> String? {
+        let text = String(newText.trimmingCharacters(in: .whitespacesAndNewlines).prefix(1000))
+        guard let target = line.msgId, line.mine, line.kind == nil, !text.isEmpty, text != line.text else { return nil }
+        guard let me = privateKey, let theirs = friendKey(friendCode) else { return needsUpdate(settings) }
+        guard let sealed = sealWithId(["type": "edit", "target": target, "text": text], to: friendCode, key: theirs),
+              await post(sealed.message, to: friendCode) else { return didntGo(settings) }
+        change(friendCode, target, mine: true) { $0.text = text; $0.edited = true; $0.preview = nil }
+        Task { await preview(target, of: friendCode, mine: true) }
+        if let copy = sealWithId(["type": "edit", "to": friendCode, "target": target, "text": text, "by": "iphone"], to: code, key: me.publicKey) {
+            if let id = copy.id { seen.insert(id) }
+            _ = await post(copy.message, to: code)
+        }
+        return nil
+    }
+
+    /// Deletes a message you sent, for them too (and on your PC).
+    func unsend(_ line: Line, of friendCode: String, settings: Settings) async -> String? {
+        guard let target = line.msgId, line.mine else { return nil }
+        guard let me = privateKey, let theirs = friendKey(friendCode) else { return needsUpdate(settings) }
+        guard let sealed = sealWithId(["type": "unsend", "target": target], to: friendCode, key: theirs),
+              await post(sealed.message, to: friendCode) else { return didntGo(settings) }
+        remove(friendCode, target, mine: true)
+        if let copy = sealWithId(["type": "unsend", "to": friendCode, "target": target, "by": "iphone"], to: code, key: me.publicKey) {
+            if let id = copy.id { seen.insert(id) }
+            _ = await post(copy.message, to: code)
+        }
+        return nil
+    }
+
+    /// Keeps a message to send at [at] (by the phone, so Dave has to be open then, or it goes the next time he is).
+    func schedule(_ text: String, to friendCode: String, at: Date, reply: String? = nil) {
+        let text = String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(1000))
+        guard !text.isEmpty else { return }
+        scheduled.append(Scheduled(code: friendCode, text: text, reply: reply, at: at))
+        scheduled.sort { $0.at < $1.at }
+        save()
+    }
+
+    func unschedule(_ id: String) {
+        scheduled.removeAll { $0.id == id }
+        save()
+    }
+
+    /// Sends the scheduled messages whose time has come.
+    func sendDue(settings: Settings) async {
+        let due = scheduled.filter { $0.at <= Date() }
+        guard !due.isEmpty else { return }
+        scheduled.removeAll { m in due.contains { $0.id == m.id } }
+        save()
+        for m in due {
+            guard await send(m.text, to: m.code, reply: m.reply, settings: settings) != nil else { continue }
+            scheduled.append(Scheduled(code: m.code, text: m.text, reply: m.reply, at: Date().addingTimeInterval(60))) // try again in a minute
+            save()
+        }
+    }
+
+    // MARK: Voice message text, translations and link previews (worked out when needed, then kept)
+
+    /// The words said in a voice message (Groq's speech-to-text).
+    func transcribe(_ id: String, of friendCode: String, settings: Settings) async {
+        guard let line = chats[friendCode]?.last(where: { $0.msgId == id && $0.kind == "voice" }), line.transcript == nil,
+              let file = Self.url(of: line) else { return }
+        change(friendCode, id, mine: line.mine) { $0.transcript = "…" }
+        let heard = try? await Groq.transcribe(file, settings: settings, remember: false)
+        let words = heard.map { $0.text.isEmpty ? settings.say("(nothing I could make out)", "(niets wat ik kon verstaan)") : $0.text }
+        change(friendCode, id, mine: line.mine) { $0.transcript = words } // (nil when it failed: tap Aa again to retry)
+    }
+
+    /// A friend's message in your language; "=" when it already was.
+    func translate(_ id: String, of friendCode: String, settings: Settings) async {
+        guard settings.translate, let line = chats[friendCode]?.last(where: { $0.msgId == id && !$0.mine && $0.kind == nil }), line.translation == nil else { return }
+        change(friendCode, id, mine: false) { $0.translation = "…" }
+        let language = Locale(identifier: "en").localizedString(forLanguageCode: settings.language) ?? "English"
+        let messages: [[String: Any]] = [
+            ["role": "system", "content": "Translate the user's chat message into \(language), keeping its tone, slang and emojis. "
+                + "If it's already in \(language) (or has no words to translate), reply with exactly =. Reply with only the translation."],
+            ["role": "user", "content": line.text],
+        ]
+        let reply = ((try? await Groq.chat(messages: messages, tools: [], settings: settings, search: false))?["content"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let translation = reply.map { $0.isEmpty || $0 == "=" || $0.caseInsensitiveCompare(line.text) == .orderedSame ? "=" : $0 } // (nil: it failed)
+        change(friendCode, id, mine: false) { $0.translation = translation }
+    }
+
+    /// The first link in a message: its page's title, text and picture (YouTube through its oEmbed, others from their og: tags).
+    private func preview(_ id: String, of friendCode: String, mine: Bool) async {
+        guard let line = chats[friendCode]?.last(where: { $0.msgId == id && $0.mine == mine }), line.kind == nil, line.preview == nil,
+              let link = Self.firstLink(in: line.text) else { return }
+        change(friendCode, id, mine: mine) { $0.preview = Preview(url: "-") }
+        var found = Preview(url: link.absoluteString)
+        let host = link.host?.lowercased() ?? ""
+        if host.hasSuffix("youtube.com") || host == "youtu.be",
+           let api = URL(string: "https://www.youtube.com/oembed?format=json&url=" + (link.absoluteString.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "")),
+           let (data, _) = try? await URLSession.shared.data(from: api), let info = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            found.title = info["title"] as? String ?? ""
+            found.text = info["author_name"] as? String ?? ""
+            found.image = info["thumbnail_url"] as? String ?? ""
+        } else {
+            var request = URLRequest(url: link, timeoutInterval: 8)
+            request.setValue("Mozilla/5.0 (compatible; Dave)", forHTTPHeaderField: "User-Agent")
+            if let (data, response) = try? await URLSession.shared.data(for: request),
+               (response as? HTTPURLResponse)?.mimeType?.contains("html") == true,
+               let html = String(data: data.prefix(400_000), encoding: .utf8) ?? String(data: data.prefix(400_000), encoding: .isoLatin1) {
+                func meta(_ key: String) -> String {
+                    for pattern in ["<meta[^>]+(?:property|name)=[\"']\(key)[\"'][^>]+content=[\"']([^\"']*)", "<meta[^>]+content=[\"']([^\"']*)[\"'][^>]+(?:property|name)=[\"']\(key)[\"']"] {
+                        guard let r = html.range(of: pattern, options: [.regularExpression, .caseInsensitive]) else { continue }
+                        let tag = String(html[r])
+                        if let value = tag.range(of: "content=[\"']([^\"']*)", options: .regularExpression) {
+                            return Self.decode(String(tag[value].dropFirst(9)))
+                        }
+                    }
+                    return ""
+                }
+                found.title = meta("og:title")
+                if found.title.isEmpty, let r = html.range(of: "<title[^>]*>[^<]*", options: [.regularExpression, .caseInsensitive]) {
+                    found.title = Self.decode(String(html[r].drop { $0 != ">" }.dropFirst())).trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                found.text = meta("og:description").isEmpty ? meta("description") : meta("og:description")
+                found.image = meta("og:image")
+                if !found.image.isEmpty, let full = URL(string: found.image, relativeTo: link) { found.image = full.absoluteString }
+            }
+        }
+        if !found.image.hasPrefix("https://") { found.image = "" }
+        let result = found.title.isEmpty ? Preview(url: "-") : Preview(url: found.url, title: String(found.title.prefix(200)), text: String(found.text.prefix(300)), image: found.image)
+        change(friendCode, id, mine: mine) { $0.preview = result }
+    }
+
+    static func firstLink(in text: String) -> URL? {
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return nil }
+        return detector.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap(\.url)
+            .first { $0.scheme == "https" || $0.scheme == "http" }
+    }
+
+    private static func decode(_ html: String) -> String {
+        guard let data = html.data(using: .utf8),
+              let text = try? NSAttributedString(data: data, options: [.documentType: NSAttributedString.DocumentType.html, .characterEncoding: String.Encoding.utf8.rawValue], documentAttributes: nil) else { return html }
+        return text.string
     }
 
     // MARK: Files

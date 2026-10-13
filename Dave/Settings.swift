@@ -36,6 +36,11 @@ final class Settings: ObservableObject {
     @Published var personality: String { didSet { defaults.set(personality, forKey: "personality") } }
     /// Short sounds in the theme's style when Dave starts and stops listening and when he's done (see ThemeSounds).
     @Published var themeSounds: Bool { didSet { defaults.set(themeSounds, forKey: "themeSounds") } }
+    /// Friends see "Seen" under what you sent once you read it (and you see theirs).
+    @Published var readReceipts: Bool { didSet { defaults.set(readReceipts, forKey: "readReceipts") } }
+    /// Translating friends' messages into your language: off, or a button per message, or automatically.
+    @Published var translate: Bool { didSet { defaults.set(translate, forKey: "translate") } }
+    @Published var translateAutomatically: Bool { didSet { defaults.set(translateAutomatically, forKey: "translateAutomatically") } }
 
     private init() {
         groqKey = defaults.string(forKey: "groqKey") ?? ""
@@ -57,6 +62,9 @@ final class Settings: ObservableObject {
         speechRate = defaults.object(forKey: "speechRate") as? Double ?? 0.5
         personality = defaults.string(forKey: "personality") ?? "normal"
         themeSounds = defaults.object(forKey: "themeSounds") as? Bool ?? true
+        readReceipts = defaults.object(forKey: "readReceipts") as? Bool ?? true
+        translate = defaults.object(forKey: "translate") as? Bool ?? true
+        translateAutomatically = defaults.bool(forKey: "translateAutomatically")
     }
 
     var hasPC: Bool { !pcAddress.trimmingCharacters(in: .whitespaces).isEmpty && !pcCode.isEmpty }

@@ -112,7 +112,7 @@ enum Groq {
     static var lastHeard = ""
     static var lastWords: [(word: String, start: Double, end: Double)] = []
 
-    static func transcribe(_ audio: URL, settings: Settings) async throws -> (text: String, language: String) {
+    static func transcribe(_ audio: URL, settings: Settings, remember: Bool = true) async throws -> (text: String, language: String) {
         guard !settings.groqKey.isEmpty else { throw Failure(message: settings.say("I need a Groq key first.", "Ik heb eerst een Groq-sleutel nodig.")) }
         let boundary = "Dave-\(UUID().uuidString)"
         var body = Data()
@@ -124,7 +124,7 @@ enum Groq {
         field("timestamp_granularities[]", "word") // when each word was said ("send Alex a voice message …")
         field("timestamp_granularities[]", "segment")
         field("prompt", "Hé \(settings.displayName), zet de muziek op pauze. Hey \(settings.displayName), what's the weather tomorrow?")
-        body.append("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"speech.m4a\"\r\nContent-Type: audio/m4a\r\n\r\n".data(using: .utf8)!)
+        body.append("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"speech.\(audio.pathExtension.isEmpty ? "m4a" : audio.pathExtension)\"\r\nContent-Type: application/octet-stream\r\n\r\n".data(using: .utf8)!)
         body.append(try Data(contentsOf: audio))
         body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
 
@@ -140,6 +140,8 @@ enum Groq {
         }
         let text = (json["text"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         // Kept for voice messages: the recording (copied: the next one overwrites it), what was heard, and when each word was said
+        // (not when it's the words of a friend's voice message)
+        guard remember else { return (isHallucination(text) ? "" : text, json["language"] as? String ?? "") }
         let kept = FileManager.default.temporaryDirectory.appendingPathComponent("last-speech.m4a")
         try? FileManager.default.removeItem(at: kept)
         try? FileManager.default.copyItem(at: audio, to: kept)

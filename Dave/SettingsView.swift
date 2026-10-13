@@ -143,6 +143,20 @@ struct SettingsView: View {
                                       "Voor een natuurlijkere stem: iOS-instellingen → Toegankelijkheid → Gesproken materiaal → Stemmen → download een Verbeterde of Premium stem."))
                 }
 
+                Section {
+                    Toggle(settings.say("Read receipts", "Leesbevestigingen"), isOn: $settings.readReceipts)
+                    Toggle(settings.say("Translate messages", "Berichten vertalen"), isOn: $settings.translate)
+                    if settings.translate {
+                        Toggle(settings.say("Translate automatically", "Automatisch vertalen"), isOn: $settings.translateAutomatically)
+                    }
+                } header: {
+                    Text(settings.say("Chats", "Chats"))
+                } footer: {
+                    Text(settings.translate && !settings.translateAutomatically
+                         ? settings.say("Hold a friend's message and tap Translate to see it in your language.", "Houd een bericht van een vriend vast en tik op Vertalen om het in jouw taal te zien.")
+                         : settings.say("Read receipts: friends see “Seen” under what they sent once you've read it, and you see theirs.", "Leesbevestigingen: vrienden zien “Gezien” onder wat ze stuurden zodra je het gelezen hebt, en jij ziet het bij hen."))
+                }
+
                 Section(settings.say("About", "Over")) {
                     LabeledContent(settings.say("Dave on this iPhone", "Dave op deze iPhone"),
                                    value: "\(Updater.currentVersion) (build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"))")

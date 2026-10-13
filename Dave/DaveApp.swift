@@ -51,6 +51,13 @@ struct RootView: View {
         .toolbarBackground(.ultraThinMaterial, for: .tabBar)
         .toolbarBackground(.visible, for: .tabBar)
         .id(settings.theme) // the tab bar in the new theme's colour too
+        .task {
+            // Scheduled chat messages go out when their time comes (while Dave is open)
+            while !Task.isCancelled {
+                await chat.sendDue(settings: settings)
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
+            }
+        }
         .onOpenURL { url in
             tab = 0
             if url.isFileURL { Brain.shared.received(file: url) } // "Open in Dave": send it to the PC

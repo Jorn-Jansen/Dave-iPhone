@@ -229,6 +229,7 @@ final class Brain: ObservableObject {
                         "to": ["type": "string", "description": "The friend's name"],
                         "text": ["type": "string", "description": "The message (for a voice message: what they say in it, if said already)"],
                         "voice": ["type": "boolean", "description": "A voice message instead of text"],
+                        "at": ["type": "string", "description": "Only to send it later ('send it tomorrow at 8'): when, as yyyy-MM-ddTHH:mm local time"],
                     ],
                     "required": ["to"],
                 ] as [String: Any],
@@ -248,6 +249,13 @@ final class Brain: ObservableObject {
         guard let friend else { return settings.say("I don't know which friend you mean.", "Ik weet niet welke vriend je bedoelt.") }
         guard args["voice"] as? Bool == true else {
             let text = args["text"] as? String ?? ""
+            let parse = DateFormatter()
+            parse.dateFormat = "yyyy-MM-dd'T'HH:mm"
+            if let at = parse.date(from: String((args["at"] as? String ?? "").prefix(16))), at.timeIntervalSinceNow > 30, !text.isEmpty {
+                chat.schedule(text, to: friend.code, at: at)
+                let when = at.formatted(date: .abbreviated, time: .shortened)
+                return settings.say("⏰ I'll send it to \(friend.name) \(when): \(text)", "⏰ Ik stuur het \(when) naar \(friend.name): \(text)")
+            }
             return await chat.send(text, to: friend.code, settings: settings) ?? settings.say("💬 Sent to \(friend.name): \(text)", "💬 Verstuurd naar \(friend.name): \(text)")
         }
         // A voice message: what you just said after "voice message", or a new recording

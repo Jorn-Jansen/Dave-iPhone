@@ -3,8 +3,9 @@ import PhotosUI
 import SwiftUI
 import UIKit
 
-/// One chat: the messages (yours on the right) with photos, videos, voice messages and files; hold a message to react;
-/// the dots while your friend types; and a box to write, a + for photos and files, and 🎤 for a voice message.
+/// One chat: the messages (yours on the right) with photos, videos, voice messages and files; hold a message to reply,
+/// react, edit or delete it, or translate it; "Seen" under what they've read; the dots while your friend types; and a box
+/// to write, a + for photos and files, ⏰ to send it later, and 🎤 for a voice message. 🔍 searches the chat.
 struct ChatView: View {
     @ObservedObject private var chat = SocialChat.shared
     let code: String
@@ -18,6 +19,12 @@ struct ChatView: View {
     @State private var replying: SocialChat.Line? // what you send next replies to this
     @State private var jumpTo: UUID?   // a message to scroll to (tapping a reply's quote)
     @State private var flashing: UUID? // and to light up for a moment
+    @State private var editing: SocialChat.Line? // what you send next replaces this message of yours
+    @State private var showWords = Set<UUID>()   // voice messages showing what's said in them
+    @State private var scheduling = false
+    @State private var sendAt = Date().addingTimeInterval(3600)
+    @State private var searching = false
+    @Environment(\.openURL) private var openURL
     @StateObject private var recorder = VoiceNoteRecorder()
     private let settings = Settings.shared
     private static let reactions = ["👍", "❤️", "😂", "😮", "😢", "🔥"]
@@ -40,6 +47,7 @@ struct ChatView: View {
                                 Text(settings.say("No messages yet. Say hi!", "Nog geen berichten. Zeg hoi!")).foregroundStyle(.secondary).padding(.top, 40)
                             }
                             ForEach(lines) { line in message(line).id(line.id) }
+                            ForEach(chat.scheduled.filter { $0.code == code }) { later in scheduledBubble(later) }
                             if chat.isTyping(code) { TypingDots().id("typing") }
                             if let problem { Text("⚠️ " + problem).font(.caption).foregroundStyle(.orange).multilineTextAlignment(.center) }
                         }
@@ -57,12 +65,25 @@ struct ChatView: View {
                     }
                 }
                 if let replying { replyBar(replying) }
+                if editing != nil { editBar }
+                if scheduling { scheduleBar }
                 composer
             }
         }
         .navigationTitle(friend?.name ?? "")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { searching = true } label: { Image(systemName: "magnifyingglass") }
+            }
+        }
+        .sheet(isPresented: $searching) {
+            ChatSearch(lines: lines, friendName: friend?.name ?? "") { found in
+                searching = false
+                Task { try? await Task.sleep(nanoseconds: 400_000_000); jumpTo = found }
+            }
+        }
         .onAppear { chat.markRead(code) }
         .onChange(of: lines.count) { _ in chat.markRead(code) } // you're looking at it
         .photosPicker(isPresented: $pickingPhotos, selection: $pickedPhotos, maxSelectionCount: 5, matching: .any(of: [.images, .videos]))
@@ -83,6 +104,9 @@ struct ChatView: View {
             // a reply: a small version of the original floats just above the bubble
             if let target = line.replyTo { quote(target).padding(.horizontal, 10) }
             bubble(line)
+            if line.mine, let seen = friend?.seenId, line.msgId == seen, settings.readReceipts { // they've read up to here
+                Text(settings.say("Seen", "Gezien") + " " + (friend?.seenAt ?? "")).font(.caption2).foregroundStyle(.secondary).padding(.horizontal, 6)
+            }
         }
         .frame(maxWidth: .infinity, alignment: line.mine ? .trailing : .leading)
     }
@@ -92,7 +116,7 @@ struct ChatView: View {
             if line.mine { Spacer(minLength: 50) }
             VStack(alignment: line.mine ? .trailing : .leading, spacing: 4) {
                 content(line)
-                Text(line.at).font(.caption2).opacity(0.6).padding(.horizontal, line.kind == nil ? 0 : 6)
+                Text(line.at + (line.edited == true ? " · " + settings.say("edited", "bewerkt") : "")).font(.caption2).opacity(0.6).padding(.horizontal, line.kind == nil ? 0 : 6)
             }
             .padding(line.kind == "photo" || line.kind == "video" ? 6 : 12)
             .background(line.mine
@@ -122,8 +146,19 @@ struct ChatView: View {
             Button { replying = line } label: { Label(settings.say("Reply", "Beantwoorden"), systemImage: "arrowshape.turn.up.left") }
         }
         if line.msgId != nil && !(friend?.key.isEmpty ?? true) {
+            if line.mine && line.kind == nil {
+                Button { replying = nil; editing = line; typed = line.text } label: { Label(settings.say("Edit", "Bewerken"), systemImage: "pencil") }
+            }
+            if !line.mine && line.kind == nil && settings.translate && !settings.translateAutomatically && line.translation == nil {
+                Button { Task { await chat.translate(line.msgId!, of: code, settings: settings) } } label: { Label(settings.say("Translate", "Vertalen"), systemImage: "globe") }
+            }
             ForEach(Self.reactions, id: \.self) { emoji in
                 Button(emoji + (line.myReaction == emoji ? " ✓" : "")) { Task { await chat.react(emoji, to: line, of: code) } }
+            }
+            if line.mine {
+                Button(role: .destructive) { Task { problem = await chat.unsend(line, of: code, settings: settings) } } label: {
+                    Label(settings.say("Delete for both of you", "Voor jullie allebei verwijderen"), systemImage: "trash")
+                }
             }
         }
         if let url = SocialChat.url(of: line) {
@@ -148,7 +183,26 @@ struct ChatView: View {
                     VideoPlayer(player: AVPlayer(url: url)).frame(width: 240, height: 180)
                         .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
                 case "voice":
-                    VoiceNotePlayer(url: url)
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 8) {
+                            VoiceNotePlayer(url: url)
+                            // "Aa": what's said in it (worked out the first time), tap again to hide it
+                            Button {
+                                if showWords.contains(line.id) { showWords.remove(line.id) } else {
+                                    showWords.insert(line.id)
+                                    if line.transcript == nil, let id = line.msgId { Task { await chat.transcribe(id, of: code, settings: settings) } }
+                                }
+                            } label: {
+                                Text("Aa").font(.caption.bold()).foregroundStyle(.white).padding(.horizontal, 7).padding(.vertical, 4)
+                                    .background(Color.white.opacity(showWords.contains(line.id) ? 0.3 : 0.12), in: RoundedRectangle(cornerRadius: 7))
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                        if showWords.contains(line.id) {
+                            Text(line.transcript == nil || line.transcript == "…" ? settings.say("Working out the words…", "Woorden uitzoeken…") : line.transcript!)
+                                .font(.callout).opacity(0.8).frame(maxWidth: 240, alignment: .leading).textSelection(.enabled)
+                        }
+                    }
                 default:
                     ShareLink(item: url) { Label(line.name ?? "file", systemImage: "doc.fill").foregroundStyle(.white) }
                 }
@@ -160,7 +214,60 @@ struct ChatView: View {
             }
         } else {
             Text(line.text).textSelection(.enabled)
+            if !line.mine, let translation = line.translation, translation != "=" { // in your language
+                Text("🌐 " + translation).font(.callout).opacity(0.75).frame(maxWidth: 260, alignment: .leading)
+            }
+            if let preview = line.preview, preview.url != "-", let link = URL(string: preview.url) { // a link: its page
+                Button { openURL(link) } label: { LinkCard(preview: preview) }.buttonStyle(.plain)
+            }
         }
+    }
+
+    /// A message waiting to be sent at its time, with ✕ to cancel it.
+    private func scheduledBubble(_ later: SocialChat.Scheduled) -> some View {
+        HStack {
+            Spacer(minLength: 50)
+            HStack(spacing: 8) {
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text(later.text)
+                    Label(later.at.formatted(date: .abbreviated, time: .shortened), systemImage: "clock").font(.caption2).opacity(0.7)
+                }
+                Button { chat.unschedule(later.id) } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.white.opacity(0.8)) }
+                    .buttonStyle(.borderless)
+            }
+            .padding(12)
+            .background(Color.davePurple.opacity(0.35), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Color.white.opacity(0.4), style: StrokeStyle(lineWidth: 1.2, dash: [5, 4])))
+        }
+    }
+
+    /// "Editing your message" above the box, with ✕.
+    private var editBar: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "pencil").font(.caption)
+            Text(settings.say("Editing your message", "Je bericht bewerken")).font(.caption)
+            Spacer()
+            Button { editing = nil; typed = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+        }
+        .padding(.horizontal, 18).padding(.top, 6)
+    }
+
+    /// ⏰: when to send what you type.
+    private var scheduleBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "clock").font(.caption)
+            DatePicker(settings.say("Send at", "Versturen om"), selection: $sendAt, in: Date()..., displayedComponents: [.date, .hourAndMinute])
+                .font(.caption).labelsHidden()
+            Spacer()
+            Button(settings.say("Schedule", "Inplannen")) {
+                let text = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty else { return }
+                chat.schedule(text, to: code, at: sendAt, reply: replying?.msgId)
+                typed = ""; replying = nil; scheduling = false
+            }
+            .font(.caption.bold()).disabled(typed.trimmingCharacters(in: .whitespaces).isEmpty)
+        }
+        .padding(.horizontal, 18).padding(.top, 6)
     }
 
     private var composer: some View {
@@ -171,12 +278,18 @@ struct ChatView: View {
             } label: {
                 Image(systemName: "plus").font(.headline).foregroundStyle(.white).frame(width: 40, height: 40).background(.ultraThinMaterial, in: Circle())
             }
+            if editing == nil {
+                Button { scheduling.toggle(); if scheduling { sendAt = Date().addingTimeInterval(3600) } } label: {
+                    Image(systemName: "clock").font(.headline).foregroundStyle(.white).frame(width: 40, height: 40)
+                        .background(scheduling ? AnyShapeStyle(Color.davePurple.opacity(0.6)) : AnyShapeStyle(.ultraThinMaterial), in: Circle())
+                }
+            }
             TextField(placeholder, text: $typed)
                 .submitLabel(.send).onSubmit(send)
                 .disabled(recorder.recording)
                 .padding(.horizontal, 16).padding(.vertical, 11)
                 .background(.ultraThinMaterial, in: Capsule())
-                .onChange(of: typed) { text in if !text.isEmpty { Task { await chat.sendTyping(to: code) } } }
+                .onChange(of: typed) { text in if !text.isEmpty && editing == nil { Task { await chat.sendTyping(to: code) } } }
             if !typed.isEmpty {
                 Button(action: send) {
                     Image(systemName: "arrow.up").font(.headline.bold()).foregroundStyle(.white).frame(width: 40, height: 40)
@@ -227,6 +340,7 @@ struct ChatView: View {
     private var placeholder: String {
         if recorder.recording { return settings.say("🎤 Recording… tap ■ to send", "🎤 Opnemen… tik ■ om te versturen") }
         if sending { return settings.say("Sending…", "Versturen…") }
+        if editing != nil { return settings.say("Edit your message…", "Bewerk je bericht…") }
         return settings.say("Message…", "Bericht…")
     }
 
@@ -239,6 +353,16 @@ struct ChatView: View {
         let text = typed.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         typed = ""
+        if let editing {
+            self.editing = nil
+            Task { problem = await chat.edit(editing, to: text, of: code, settings: settings) }
+            return
+        }
+        if scheduling { // the ⏰ bar is open: then the arrow schedules it too
+            chat.schedule(text, to: code, at: sendAt, reply: replying?.msgId)
+            replying = nil; scheduling = false
+            return
+        }
         let reply = replying?.msgId
         replying = nil
         Task { problem = await chat.send(text, to: code, reply: reply, settings: settings) }
@@ -280,6 +404,107 @@ struct ChatView: View {
         replying = nil
         problem = await chat.sendFile(data, name: name, kind: kind, to: code, reply: reply, settings: settings)
         sending = false
+    }
+}
+
+/// A link's page under a message: its picture, title and a bit of its text.
+private struct LinkCard: View {
+    let preview: SocialChat.Preview
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            if let image = URL(string: preview.image), !preview.image.isEmpty {
+                AsyncImage(url: image) { picture in picture.resizable().scaledToFill() } placeholder: { Color.white.opacity(0.08) }
+                    .frame(width: 56, height: 56).clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(preview.title).font(.footnote.bold()).lineLimit(2)
+                if !preview.text.isEmpty { Text(preview.text).font(.caption).opacity(0.7).lineLimit(2) }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(8)
+        .frame(maxWidth: 260)
+        .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+/// Searching a chat: words, what kind (photos, videos, voice, files, links), who sent it, and between which dates.
+/// Tap a result to see it in the chat.
+private struct ChatSearch: View {
+    let lines: [SocialChat.Line]
+    let friendName: String
+    let found: (UUID) -> Void
+    @State private var words = ""
+    @State private var kind = ""
+    @State private var who = ""
+    @State private var useAfter = false
+    @State private var after = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
+    @State private var useBefore = false
+    @State private var before = Date()
+    @Environment(\.dismiss) private var dismiss
+    private let settings = Settings.shared
+
+    private var results: [SocialChat.Line] {
+        let q = words.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty || !kind.isEmpty || !who.isEmpty || useAfter || useBefore else { return [] }
+        return lines.reversed().filter { l in
+            if kind == "link" { if SocialChat.firstLink(in: l.text) == nil || l.kind != nil { return false } }
+            else if !kind.isEmpty && l.kind != kind { return false }
+            if who == "me" && !l.mine || who == "them" && l.mine { return false }
+            let day = l.date ?? .distantPast
+            if useAfter && day < Calendar.current.startOfDay(for: after) { return false }
+            if useBefore, let end = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: before)), day >= end { return false }
+            return q.isEmpty || [l.text, l.name, l.transcript, l.translation].compactMap { $0?.lowercased() }.contains { $0.contains(q) }
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Picker(settings.say("Kind", "Soort"), selection: $kind) {
+                        Text(settings.say("All", "Alles")).tag("")
+                        Text("📷 " + settings.say("Photos", "Foto's")).tag("photo")
+                        Text("🎬 " + settings.say("Videos", "Video's")).tag("video")
+                        Text("🎤 " + settings.say("Voice", "Spraak")).tag("voice")
+                        Text("📎 " + settings.say("Files", "Bestanden")).tag("file")
+                        Text("🔗 Links").tag("link")
+                    }
+                    Picker(settings.say("From", "Van"), selection: $who) {
+                        Text(settings.say("Anyone", "Iedereen")).tag("")
+                        Text(settings.say("You", "Jij")).tag("me")
+                        Text(friendName).tag("them")
+                    }
+                    Toggle(settings.say("Sent after", "Verstuurd na"), isOn: $useAfter)
+                    if useAfter { DatePicker(settings.say("After", "Na"), selection: $after, displayedComponents: .date) }
+                    Toggle(settings.say("Sent before", "Verstuurd voor"), isOn: $useBefore)
+                    if useBefore { DatePicker(settings.say("Before", "Voor"), selection: $before, displayedComponents: .date) }
+                }
+                Section {
+                    if results.isEmpty && (!words.isEmpty || !kind.isEmpty || !who.isEmpty || useAfter || useBefore) {
+                        Text(settings.say("Nothing found", "Niets gevonden")).foregroundStyle(.secondary)
+                    }
+                    ForEach(results.prefix(80)) { l in
+                        Button { found(l.id) } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack {
+                                    Text(l.mine ? settings.say("You", "Jij") : friendName).font(.caption.bold())
+                                    Spacer()
+                                    Text((l.date.map { $0.formatted(date: .abbreviated, time: .omitted) } ?? "") + " " + l.at).font(.caption2).foregroundStyle(.secondary)
+                                }
+                                Text(l.text).font(.callout).lineLimit(2)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .searchable(text: $words, placement: .navigationBarDrawer(displayMode: .always), prompt: settings.say("Search…", "Zoeken…"))
+            .navigationTitle(settings.say("Search", "Zoeken"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button(settings.say("Close", "Sluiten")) { dismiss() } } }
+        }
     }
 }
 
