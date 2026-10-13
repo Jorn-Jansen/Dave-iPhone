@@ -24,6 +24,7 @@ struct ChatView: View {
     @State private var scheduling = false
     @State private var sendAt = Date().addingTimeInterval(3600)
     @State private var searching = false
+    @State private var makingPoll = false
     @Environment(\.openURL) private var openURL
     @StateObject private var recorder = VoiceNoteRecorder()
     private let settings = Settings.shared
@@ -76,6 +77,14 @@ struct ChatView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button { searching = true } label: { Image(systemName: "magnifyingglass") }
+            }
+        }
+        .sheet(isPresented: $makingPoll) {
+            PollMaker { question, answers in
+                makingPoll = false
+                let reply = replying?.msgId
+                replying = nil
+                Task { problem = await chat.sendPoll(question, options: answers, to: code, reply: reply, settings: settings) }
             }
         }
         .sheet(isPresented: $searching) {
@@ -170,7 +179,11 @@ struct ChatView: View {
     }
 
     @ViewBuilder private func content(_ line: SocialChat.Line) -> some View {
-        if let kind = line.kind {
+        if line.kind == "poll" {
+            PollView(line: line, friendName: friend?.name ?? "", canVote: !(friend?.key.isEmpty ?? true)) { choice in
+                Task { await chat.vote(choice, in: line, of: code) }
+            }
+        } else if let kind = line.kind {
             if let url = SocialChat.url(of: line) {
                 switch kind {
                 case "photo":
@@ -275,6 +288,7 @@ struct ChatView: View {
             Menu {
                 Button { pickingPhotos = true } label: { Label(settings.say("Photo or video", "Foto of video"), systemImage: "photo.on.rectangle") }
                 Button { pickingFile = true } label: { Label(settings.say("File", "Bestand"), systemImage: "doc") }
+                Button { makingPoll = true } label: { Label(settings.say("Poll", "Poll"), systemImage: "chart.bar") }
             } label: {
                 Image(systemName: "plus").font(.headline).foregroundStyle(.white).frame(width: 40, height: 40).background(.ultraThinMaterial, in: Circle())
             }
@@ -335,7 +349,10 @@ struct ChatView: View {
         .padding(.horizontal, 18).padding(.top, 6)
     }
 
-    private func snippet(_ line: SocialChat.Line) -> String { line.text.count > 90 ? String(line.text.prefix(90)) + "…" : line.text }
+    private func snippet(_ line: SocialChat.Line) -> String {
+        let text = (line.kind == "poll" ? "📊 " : "") + line.text
+        return text.count > 90 ? String(text.prefix(90)) + "…" : text
+    }
 
     private var placeholder: String {
         if recorder.recording { return settings.say("🎤 Recording… tap ■ to send", "🎤 Opnemen… tik ■ om te versturen") }
@@ -407,6 +424,95 @@ struct ChatView: View {
     }
 }
 
+/// A poll in the chat: each answer with a bar for its votes and who picked it; tap one to vote (again: take it back).
+private struct PollView: View {
+    let line: SocialChat.Line
+    let friendName: String
+    let canVote: Bool
+    let vote: (Int) -> Void
+    private let settings = Settings.shared
+
+    var body: some View {
+        let votes = [line.myVote, line.theirVote].compactMap { $0 }.count
+        VStack(alignment: .leading, spacing: 7) {
+            Text("📊 " + line.text).font(.callout.bold())
+            ForEach(Array((line.options ?? []).enumerated()), id: \.offset) { i, answer in
+                let count = (line.myVote == i ? 1 : 0) + (line.theirVote == i ? 1 : 0)
+                Button { vote(i) } label: {
+                    HStack(spacing: 6) {
+                        Text(answer).font(.callout).frame(maxWidth: .infinity, alignment: .leading)
+                        if line.myVote == i { voter(settings.say("You", "Jij"), mine: true) }
+                        if line.theirVote == i { voter(friendName, mine: false) }
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 8)
+                    .background(alignment: .leading) {
+                        GeometryReader { geo in
+                            Color.daveCyan.opacity(0.3).frame(width: geo.size.width * CGFloat(count) / 2)
+                        }
+                    }
+                    .background(Color.white.opacity(0.06))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(line.myVote == i ? Color.daveCyan : Color.white.opacity(0.2), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .disabled(!canVote)
+                .animation(.easeOut(duration: 0.25), value: count)
+            }
+            Text(votes == 2 ? settings.say("You both voted", "Jullie hebben allebei gestemd")
+                 : line.myVote != nil ? settings.say("Waiting for \(friendName) to vote", "Wacht tot \(friendName) stemt")
+                 : line.theirVote != nil ? settings.say("\(friendName) voted — your turn", "\(friendName) heeft gestemd — jij bent")
+                 : settings.say("No votes yet", "Nog geen stemmen"))
+                .font(.caption).opacity(0.7)
+        }
+        .frame(width: 250)
+    }
+
+    private func voter(_ name: String, mine: Bool) -> some View {
+        Text(name).font(.caption2).padding(.horizontal, 6).padding(.vertical, 2)
+            .background(mine ? Color.daveViolet.opacity(0.55) : Color.white.opacity(0.16), in: Capsule())
+    }
+}
+
+/// Making a poll: a question and 2 to 6 answers.
+private struct PollMaker: View {
+    let done: (String, [String]) -> Void
+    @State private var question = ""
+    @State private var answers = ["", ""]
+    @Environment(\.dismiss) private var dismiss
+    private let settings = Settings.shared
+
+    private var ready: Bool {
+        !question.trimmingCharacters(in: .whitespaces).isEmpty && answers.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.count >= 2
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section(settings.say("Question", "Vraag")) {
+                    TextField(settings.say("Ask a question…", "Stel een vraag…"), text: $question)
+                }
+                Section(settings.say("Answers", "Antwoorden")) {
+                    ForEach(answers.indices, id: \.self) { i in
+                        TextField(settings.say("Answer", "Antwoord") + " \(i + 1)", text: $answers[i])
+                    }
+                    .onDelete { rows in if answers.count - rows.count >= 2 { answers.remove(atOffsets: rows) } }
+                    if answers.count < 6 {
+                        Button { answers.append("") } label: { Label(settings.say("Add an answer", "Antwoord toevoegen"), systemImage: "plus") }
+                    }
+                }
+            }
+            .navigationTitle(settings.say("Poll", "Poll"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button(settings.say("Cancel", "Annuleren")) { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(settings.say("Send", "Versturen")) { done(question, answers) }.disabled(!ready)
+                }
+            }
+        }
+    }
+}
+
 /// A link's page under a message: its picture, title and a bit of its text.
 private struct LinkCard: View {
     let preview: SocialChat.Preview
@@ -470,6 +576,7 @@ private struct ChatSearch: View {
                         Text("🎤 " + settings.say("Voice", "Spraak")).tag("voice")
                         Text("📎 " + settings.say("Files", "Bestanden")).tag("file")
                         Text("🔗 Links").tag("link")
+                        Text("📊 Polls").tag("poll")
                     }
                     Picker(settings.say("From", "Van"), selection: $who) {
                         Text(settings.say("Anyone", "Iedereen")).tag("")

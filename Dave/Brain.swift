@@ -229,6 +229,7 @@ final class Brain: ObservableObject {
                         "to": ["type": "string", "description": "The friend's name"],
                         "text": ["type": "string", "description": "The message (for a voice message: what they say in it, if said already)"],
                         "voice": ["type": "boolean", "description": "A voice message instead of text"],
+                        "poll": ["type": "string", "description": "Only for a poll ('ask Alex: Roblox or Minecraft tonight?'): its answers (2 to 6) separated by |, e.g. 'Roblox|Minecraft'; text = the question"],
                         "at": ["type": "string", "description": "Only to send it later ('send it tomorrow at 8'): when, as yyyy-MM-ddTHH:mm local time"],
                     ],
                     "required": ["to"],
@@ -249,6 +250,11 @@ final class Brain: ObservableObject {
         guard let friend else { return settings.say("I don't know which friend you mean.", "Ik weet niet welke vriend je bedoelt.") }
         guard args["voice"] as? Bool == true else {
             let text = args["text"] as? String ?? ""
+            let answers = (args["poll"] as? String ?? "").split(separator: "|").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            if answers.count >= 2 { // a poll
+                return await chat.sendPoll(text, options: answers, to: friend.code, settings: settings)
+                    ?? settings.say("📊 Poll sent to " + friend.name + ": " + text, "📊 Poll verstuurd naar " + friend.name + ": " + text)
+            }
             let parse = DateFormatter()
             parse.dateFormat = "yyyy-MM-dd'T'HH:mm"
             if let at = parse.date(from: String((args["at"] as? String ?? "").prefix(16))), at.timeIntervalSinceNow > 30, !text.isEmpty {

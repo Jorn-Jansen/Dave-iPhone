@@ -67,6 +67,10 @@ final class SocialChat: ObservableObject {
         var translation: String?
         /// The first link's page (url "-" when there's nothing to show).
         var preview: Preview?
+        /// A poll (kind "poll", the question in text): its answers, and which one you and your friend picked (nil = none yet).
+        var options: [String]?
+        var myVote: Int?
+        var theirVote: Int?
     }
 
     @Published private(set) var code = ""
@@ -190,6 +194,11 @@ final class SocialChat: ObservableObject {
                 let fileName = Self.safeName(inner["filename"] as? String ?? "file")
                 add(to, Line(mine: true, text: Self.label(kind, fileName), at: Self.now(), msgId: id, kind: kind, name: fileName, replyTo: Self.reply(inner)))
                 Task { await download(inner, from: to, id: id, name: fileName) }
+            case "sentpoll": // a poll you sent from the PC
+                guard let question = Self.question(inner), let answers = Self.answers(inner) else { return }
+                add(to, Line(mine: true, text: question, at: Self.now(), msgId: inner["msgid"] as? String, kind: "poll", replyTo: Self.reply(inner), options: answers))
+            case "vote": // what you picked on the PC
+                change(to, target, mine: nil) { line in if let choice = Self.choice(inner, line) { line.myVote = choice } }
             case "edit":
                 change(to, target, mine: true) { $0.text = String((inner["text"] as? String ?? "").prefix(1000)); $0.edited = true; $0.preview = nil }
                 Task { await preview(target, of: to, mine: true) }
@@ -227,6 +236,13 @@ final class SocialChat: ObservableObject {
             let emoji = String((inner["emoji"] as? String ?? "").prefix(8))
             lines[at].theirReaction = emoji.isEmpty ? nil : emoji
             chats[from] = lines
+        case "poll": // a question with answers to pick from
+            guard let question = Self.question(inner), let answers = Self.answers(inner) else { return }
+            typing[from] = nil
+            add(from, Line(mine: false, text: question, at: Self.now(), msgId: id, kind: "poll", replyTo: Self.reply(inner), options: answers))
+            friends[index].unread += 1
+        case "vote": // they picked an answer in a poll (-1: took it back)
+            change(from, inner["target"] as? String ?? "", mine: nil) { line in if let choice = Self.choice(inner, line) { line.theirVote = choice } }
         case "edit": // they changed a message they sent
             let target = inner["target"] as? String ?? ""
             change(from, target, mine: false) { $0.text = String((inner["text"] as? String ?? "").prefix(1000)); $0.edited = true; $0.translation = nil; $0.preview = nil }
@@ -272,8 +288,8 @@ final class SocialChat: ObservableObject {
     }
 
     /// Changes the line with message id [id] (yours or theirs) in a chat.
-    private func change(_ friend: String, _ id: String, mine: Bool, _ edit: (inout Line) -> Void) {
-        guard !id.isEmpty, var lines = chats[friend], let at = lines.lastIndex(where: { $0.msgId == id && $0.mine == mine }) else { return }
+    private func change(_ friend: String, _ id: String, mine: Bool?, _ edit: (inout Line) -> Void) {
+        guard !id.isEmpty, var lines = chats[friend], let at = lines.lastIndex(where: { $0.msgId == id && (mine == nil || $0.mine == mine) }) else { return }
         edit(&lines[at])
         chats[friend] = lines
         save()
@@ -392,6 +408,57 @@ final class SocialChat: ObservableObject {
         if !keep { request.setValue("no", forHTTPHeaderField: "Cache") } // only matters right now
         guard let (_, response) = try? await URLSession.shared.data(for: request) else { return false }
         return (response as? HTTPURLResponse)?.statusCode == 200
+    }
+
+    // MARK: Polls
+
+    private static func question(_ inner: [String: Any]) -> String? {
+        let q = (inner["text"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return q.isEmpty ? nil : String(q.prefix(200))
+    }
+
+    /// A poll's answers: 2 to 6 short ones (nil when it isn't a proper poll).
+    private static func answers(_ inner: [String: Any]) -> [String]? {
+        let list = (inner["options"] as? [Any] ?? []).compactMap { ($0 as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }.map { String($0.prefix(80)) }
+        return (2...6).contains(list.count) ? list : nil
+    }
+
+    /// The answer a vote picked (nil when it's not a valid one; -1 = took the vote back).
+    private static func choice(_ inner: [String: Any], _ poll: Line) -> Int?? {
+        guard poll.kind == "poll", let choice = (inner["choice"] as? NSNumber)?.intValue, choice >= -1, choice < (poll.options?.count ?? 0) else { return nil }
+        return .some(choice < 0 ? nil : choice)
+    }
+
+    /// "Ask Alex: Roblox or Minecraft tonight?": a question with 2 to 6 answers. Nil when it went, otherwise why not.
+    func sendPoll(_ question: String, options: [String], to friendCode: String, reply: String? = nil, settings: Settings) async -> String? {
+        let q = String(question.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))
+        var answers: [String] = []
+        for o in options.map({ String($0.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80)) }) where !o.isEmpty && !answers.contains(o) && answers.count < 6 { answers.append(o) }
+        guard !q.isEmpty, answers.count >= 2 else { return settings.say("A poll needs a question and at least two answers.", "Een poll heeft een vraag en minstens twee antwoorden nodig.") }
+        guard let me = privateKey else { return settings.say("Connect me to your PC once (⚙) to chat.", "Koppel me één keer aan je pc (⚙) om te chatten.") }
+        guard let theirs = friendKey(friendCode) else { return needsUpdate(settings) }
+        guard let sealed = sealWithId(["type": "poll", "text": q, "options": answers, "reply": reply ?? ""], to: friendCode, key: theirs),
+              await post(sealed.message, to: friendCode) else { return didntGo(settings) }
+        add(friendCode, Line(mine: true, text: q, at: Self.now(), msgId: sealed.id, kind: "poll", replyTo: reply, options: answers))
+        save()
+        if let copy = sealWithId(["type": "sentpoll", "to": friendCode, "text": q, "options": answers, "by": "iphone", "msgid": sealed.id ?? "", "reply": reply ?? ""], to: code, key: me.publicKey) {
+            if let id = copy.id { seen.insert(id) }
+            _ = await post(copy.message, to: code)
+        }
+        return nil
+    }
+
+    /// Pick an answer in a poll (the same one again takes your vote back).
+    func vote(_ choice: Int, in poll: Line, of friendCode: String) async {
+        guard let target = poll.msgId, poll.kind == "poll", choice >= 0, choice < (poll.options?.count ?? 0), let theirs = friendKey(friendCode) else { return }
+        let new = poll.myVote == choice ? nil : choice
+        change(friendCode, target, mine: poll.mine) { $0.myVote = new }
+        if let sealed = sealWithId(["type": "vote", "target": target, "choice": new ?? -1], to: friendCode, key: theirs) { _ = await post(sealed.message, to: friendCode) }
+        if let me = privateKey, let copy = sealWithId(["type": "vote", "to": friendCode, "target": target, "choice": new ?? -1, "by": "iphone"], to: code, key: me.publicKey) {
+            if let id = copy.id { seen.insert(id) }
+            _ = await post(copy.message, to: code)
+        }
     }
 
     // MARK: Edit, delete, schedule
