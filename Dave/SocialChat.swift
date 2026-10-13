@@ -184,6 +184,12 @@ final class SocialChat: ObservableObject {
                 let line = Line(mine: true, text: inner["text"] as? String ?? "", at: Self.now(), msgId: inner["msgid"] as? String, replyTo: Self.reply(inner))
                 add(to, line)
                 if let id = line.msgId { Task { await preview(id, of: to, mine: true) } }
+            case "sentfile": // a photo, video, voice message or file you sent from the PC: fetched here too
+                guard let id = inner["msgid"] as? String, !id.isEmpty, id.count <= 64 else { return }
+                let kind = ["voice", "photo", "video"].contains(inner["kind"] as? String ?? "") ? inner["kind"] as! String : "file"
+                let fileName = Self.safeName(inner["filename"] as? String ?? "file")
+                add(to, Line(mine: true, text: Self.label(kind, fileName), at: Self.now(), msgId: id, kind: kind, name: fileName, replyTo: Self.reply(inner)))
+                Task { await download(inner, from: to, id: id, name: fileName) }
             case "edit":
                 change(to, target, mine: true) { $0.text = String((inner["text"] as? String ?? "").prefix(1000)); $0.edited = true; $0.preview = nil }
                 Task { await preview(target, of: to, mine: true) }
@@ -329,6 +335,17 @@ final class SocialChat: ObservableObject {
         try? data.write(to: Self.filesFolder.appendingPathComponent(kept))
         add(friendCode, Line(mine: true, text: Self.label(kind, name), at: Self.now(), msgId: id, kind: kind, name: name, file: kept, replyTo: reply))
         save()
+        // A copy for your PC (sealed with your own key): where the file is and how to unlock it, so it's in the chat there too
+        var copy = inner
+        copy["type"] = "sentfile"
+        copy["to"] = friendCode
+        copy["by"] = "iphone"
+        copy["msgid"] = id
+        copy["id"] = nil // (the copy gets its own)
+        if let me = privateKey, let sealedCopy = sealWithId(copy, to: code, key: me.publicKey) {
+            if let copyId = sealedCopy.id { seen.insert(copyId) }
+            _ = await post(sealedCopy.message, to: code)
+        }
         return nil
     }
 
