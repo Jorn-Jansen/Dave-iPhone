@@ -79,10 +79,18 @@ struct ChatView: View {
     }
 
     private func message(_ line: SocialChat.Line) -> some View {
+        VStack(alignment: line.mine ? .trailing : .leading, spacing: 3) {
+            // a reply: a small version of the original floats just above the bubble
+            if let target = line.replyTo { quote(target).padding(.horizontal, 10) }
+            bubble(line)
+        }
+        .frame(maxWidth: .infinity, alignment: line.mine ? .trailing : .leading)
+    }
+
+    private func bubble(_ line: SocialChat.Line) -> some View {
         HStack {
             if line.mine { Spacer(minLength: 50) }
             VStack(alignment: line.mine ? .trailing : .leading, spacing: 4) {
-                if let target = line.replyTo { quote(target) }
                 content(line)
                 Text(line.at).font(.caption2).opacity(0.6).padding(.horizontal, line.kind == nil ? 0 : 6)
             }
@@ -195,11 +203,8 @@ struct ChatView: View {
                 if let original { Text(original.mine ? settings.say("You", "Jij") : friend?.name ?? "").font(.caption.bold()) }
                 Text(original.map(snippet) ?? settings.say("a message that's no longer here", "een bericht dat er niet meer is")).font(.caption).lineLimit(1)
             }
-            .padding(.horizontal, 8).padding(.vertical, 4)
-            .frame(maxWidth: 230, alignment: .leading)
-            .background(Color.black.opacity(0.2), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay(alignment: .leading) { Rectangle().fill(Color.daveCyan.opacity(0.8)).frame(width: 2) }
-            .opacity(0.85)
+            .frame(maxWidth: 260)
+            .foregroundStyle(.white.opacity(0.65))
         }
         .buttonStyle(.plain)
     }
