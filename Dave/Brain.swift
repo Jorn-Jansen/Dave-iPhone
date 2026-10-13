@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import Photos
 import UIKit
@@ -208,7 +209,107 @@ final class Brain: ObservableObject {
         return messages
     }
 
-    private var tools: [[String: Any]] { PhoneTools.definitions + [settingsTool] + (settings.hasPC ? [pcControlTool, pcTool] : []) }
+    private var tools: [[String: Any]] {
+        PhoneTools.definitions + [settingsTool] + (SocialChat.shared.ready ? [messageTool] : []) + (settings.hasPC ? [pcControlTool, pcTool] : [])
+    }
+
+    /// "Tell Alex I'm online", "send Sam a voice message I'll be late": straight from the phone (SocialChat), also without the PC.
+    private var messageTool: [String: Any] {
+        [
+            "type": "function",
+            "function": [
+                "name": "send_message",
+                "description": "Send a chat message to a friend who uses Dave too (Dave's Social chat), straight from this phone: 'tell Alex I'm online', "
+                    + "'ask Sam if he's coming to play' (text = the message in the user's own words), or a voice message in their own voice: "
+                    + "'send Alex a voice message' / 'send Sam a voice message I'll be late' (voice = true; text = what they say in it, empty if not said yet). "
+                    + "Friends: " + SocialChat.shared.friends.filter { $0.status == "friend" }.map(\.name).joined(separator: ", ") + ".",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "to": ["type": "string", "description": "The friend's name"],
+                        "text": ["type": "string", "description": "The message (for a voice message: what they say in it, if said already)"],
+                        "voice": ["type": "boolean", "description": "A voice message instead of text"],
+                    ],
+                    "required": ["to"],
+                ] as [String: Any],
+            ] as [String: Any],
+        ]
+    }
+
+    /// Sends a text or voice message to a friend; returns what to say.
+    private func sendMessage(_ args: [String: Any], question: String) async -> String {
+        let chat = SocialChat.shared
+        let friends = chat.friends.filter { $0.status == "friend" }
+        let asked = (args["to"] as? String ?? "").lowercased()
+        // The friend named in what you said counts over the AI's spelling; then the AI's name; one friend: that one
+        let friend = friends.first { question.lowercased().contains($0.name.lowercased()) }
+            ?? friends.first { $0.name.lowercased() == asked || $0.name.lowercased().hasPrefix(asked) && !asked.isEmpty }
+            ?? (friends.count == 1 ? friends.first : nil)
+        guard let friend else { return settings.say("I don't know which friend you mean.", "Ik weet niet welke vriend je bedoelt.") }
+        guard args["voice"] as? Bool == true else {
+            let text = args["text"] as? String ?? ""
+            return await chat.send(text, to: friend.code, settings: settings) ?? settings.say("💬 Sent to \(friend.name): \(text)", "💬 Verstuurd naar \(friend.name): \(text)")
+        }
+        // A voice message: what you just said after "voice message", or a new recording
+        var clip: URL?
+        if !(args["text"] as? String ?? "").isEmpty, Groq.lastHeard == question, let recording = Groq.lastRecording {
+            clip = await voicePart(of: recording, words: Groq.lastWords)
+        }
+        if clip == nil {
+            state = .speaking
+            await voice.speak(settings.say("Go ahead.", "Zeg het maar."), language: settings.language, rate: settings.speechRate)
+            clip = await recordClip()
+        }
+        guard let clip, let data = try? Data(contentsOf: clip) else {
+            return settings.say("I didn't hear anything, so I didn't send it.", "Ik hoorde niets, dus ik heb niets gestuurd.")
+        }
+        state = .thinking
+        return await chat.sendFile(data, name: "Voice message.m4a", kind: "voice", to: friend.code, settings: settings)
+            ?? settings.say("🎤 Sent your voice message to \(friend.name).", "🎤 Je spraakbericht is naar \(friend.name) gestuurd.")
+    }
+
+    /// The recording from just after the words "voice message" (or "spraakbericht") to the end; nil when there's nothing after them.
+    private func voicePart(of url: URL, words: [(word: String, start: Double, end: Double)]) async -> URL? {
+        let plain = words.map { $0.word.lowercased().filter(\.isLetter) }
+        let markers: Set<String> = ["message", "bericht", "spraakbericht", "voicemessage", "memo", "note", "voicemail", "spraakmemo"]
+        guard let at = plain.lastIndex(where: { markers.contains($0) }), at < words.count - 1 else { return nil }
+        let from = max(words[at].end, words[at + 1].start - 0.15)
+        let asset = AVURLAsset(url: url)
+        guard let total = try? await asset.load(.duration).seconds, total - from > 0.5,
+              let export = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else { return nil }
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("voice-part.m4a")
+        try? FileManager.default.removeItem(at: out)
+        export.outputURL = out
+        export.outputFileType = .m4a
+        export.timeRange = CMTimeRange(start: CMTime(seconds: from, preferredTimescale: 600), end: CMTime(seconds: total, preferredTimescale: 600))
+        await export.export()
+        return export.status == .completed ? out : nil
+    }
+
+    /// Records until you've said something and then are quiet for a moment (a minute at most), for a voice message.
+    private func recordClip() async -> URL? {
+        guard await voice.allowMicrophone(), (try? voice.startRecording()) != nil else { return nil }
+        state = .listening
+        let started = Date()
+        var heardSomething = false
+        var lastLoud = Date()
+        while !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            level = voice.level
+            if level > 0.22 { heardSomething = true; lastLoud = Date() }
+            if heardSomething && Date().timeIntervalSince(lastLoud) > 1.8 { break }
+            if !heardSomething && Date().timeIntervalSince(started) > 7 { break }
+            if Date().timeIntervalSince(started) > 60 { break }
+        }
+        level = 0
+        guard heardSomething, let file = voice.stopRecording() else { _ = voice.stopRecording(); return nil }
+        Haptics.heard()
+        ThemeSounds.play(.heard)
+        let clip = FileManager.default.temporaryDirectory.appendingPathComponent("voice-clip.m4a")
+        try? FileManager.default.removeItem(at: clip)
+        try? FileManager.default.copyItem(at: file, to: clip)
+        return clip
+    }
 
     /// "Switch to the ember theme", "be a butler", "talk faster": Dave changes his own settings on the phone.
     private var settingsTool: [String: Any] {
@@ -328,6 +429,7 @@ final class Brain: ObservableObject {
             }
 
         case "change_setting": return (changeSetting(args), [])
+        case "send_message": return (await sendMessage(args, question: question), [])
         case "music": return (try await PhoneTools.music(args, settings: settings), [])
 
         case "phone_reminder":
@@ -517,7 +619,7 @@ final class Brain: ObservableObject {
                 "description": "Ask Dave on the user's Windows PC to do or find out something there: its music or Spotify, volume, "
                     + "opening or closing programs and websites, locking it, files, what's on its screen, timers and reminders on the PC, "
                     + "its notifications and messages, screen time, how the PC is doing or why a game lags, the page open in its browser, game help, "
-                    + "chatting with friends who use Dave ('tell Alex I'm online', 'any messages?'), and Dave's settings on the PC.",
+                    + "reading messages from friends ('any messages?'), and Dave's settings on the PC.",
                 "parameters": [
                     "type": "object",
                     "properties": ["request": ["type": "string", "description": "The request as the user would say it to Dave on the PC, e.g. 'pause the music'"]],

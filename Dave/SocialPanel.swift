@@ -1,3 +1,5 @@
+import AVKit
+import PhotosUI
 import SwiftUI
 import UIKit
 
@@ -30,17 +32,13 @@ struct SocialPanel: View {
             .navigationDestination(for: String.self) { code in ChatView(code: code) }
             .toolbar(.hidden, for: .navigationBar)
         }
+        .task { await chat.listen() } // new messages (and "typing…") as they come, while this tab is open
         .task {
-            // New messages every few seconds; your friends (and requests) from the PC now and then, when it can be reached
-            var tick = 0
+            // Your friends (and requests) from the PC now and then, when it can be reached
             while !Task.isCancelled {
-                if tick % 6 == 0 {
-                    await data.refresh()
-                    await chat.sync(settings: settings, pcFriends: data.friends)
-                }
-                await chat.fetch()
-                tick += 1
-                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                await data.refresh()
+                await chat.sync(settings: settings, pcFriends: data.friends)
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
             }
         }
         .onChange(of: data.note) { note in noteShown = note != nil }
@@ -176,85 +174,3 @@ private struct Avatar: View {
     }
 }
 
-/// One chat: the messages (yours on the right), and a box to write a new one.
-private struct ChatView: View {
-    @ObservedObject private var chat = SocialChat.shared
-    let code: String
-    @State private var typed = ""
-    @State private var problem: String?
-    private let settings = Settings.shared
-
-    private var friend: SocialChat.Friend? { chat.friends.first { $0.code == code } }
-    private var lines: [SocialChat.Line] { chat.chats[code] ?? [] }
-
-    var body: some View {
-        ZStack {
-            AuroraBackground()
-            VStack(spacing: 0) {
-                ScrollViewReader { scroll in
-                    ScrollView {
-                        LazyVStack(spacing: 10) {
-                            if friend?.key.isEmpty ?? true { // only a warning; encrypted is simply how it is
-                                Text(settings.say("⚠️ Not encrypted yet: they need the latest Dave", "⚠️ Nog niet versleuteld: ze hebben de nieuwste Dave nodig"))
-                                    .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                            }
-                            if lines.isEmpty {
-                                Text(settings.say("No messages yet. Say hi!", "Nog geen berichten. Zeg hoi!")).foregroundStyle(.secondary).padding(.top, 40)
-                            }
-                            ForEach(lines) { line in
-                                HStack {
-                                    if line.mine { Spacer(minLength: 50) }
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(line.text)
-                                        Text(line.at).font(.caption2).opacity(0.6)
-                                    }
-                                    .padding(.horizontal, 14).padding(.vertical, 10)
-                                    .background(line.mine
-                                                ? AnyShapeStyle(LinearGradient(colors: [.davePurple.opacity(0.85), .daveViolet.opacity(0.85)], startPoint: .topLeading, endPoint: .bottomTrailing))
-                                                : AnyShapeStyle(.ultraThinMaterial),
-                                                in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                                    .textSelection(.enabled)
-                                    if !line.mine { Spacer(minLength: 50) }
-                                }
-                                .id(line.id)
-                            }
-                            if let problem { Text("⚠️ " + problem).font(.caption).foregroundStyle(.orange).multilineTextAlignment(.center) }
-                        }
-                        .padding(16)
-                    }
-                    .onAppear { scrollDown(scroll) }
-                    .onChange(of: lines.count) { _ in withAnimation { scrollDown(scroll) } }
-                }
-                HStack(spacing: 10) {
-                    TextField(settings.say("Message…", "Bericht…"), text: $typed)
-                        .submitLabel(.send).onSubmit(send)
-                        .padding(.horizontal, 16).padding(.vertical, 12)
-                        .background(.ultraThinMaterial, in: Capsule())
-                    if !typed.isEmpty {
-                        Button(action: send) {
-                            Image(systemName: "arrow.up").font(.headline.bold()).foregroundStyle(.white).frame(width: 44, height: 44)
-                                .background(LinearGradient(colors: [.davePurple, .davePink], startPoint: .topLeading, endPoint: .bottomTrailing), in: Circle())
-                        }
-                    }
-                }
-                .padding(.horizontal, 16).padding(.vertical, 10)
-            }
-        }
-        .navigationTitle(friend?.name ?? "")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.visible, for: .navigationBar)
-        .onAppear { chat.markRead(code) }
-        .onChange(of: lines.count) { _ in chat.markRead(code) } // you're looking at it
-    }
-
-    private func scrollDown(_ scroll: ScrollViewProxy) {
-        if let last = lines.last { scroll.scrollTo(last.id, anchor: .bottom) }
-    }
-
-    private func send() {
-        let text = typed.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-        typed = ""
-        Task { problem = await chat.send(text, to: code, settings: settings) }
-    }
-}

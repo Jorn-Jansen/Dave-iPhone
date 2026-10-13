@@ -107,6 +107,11 @@ enum Groq {
     }
 
     /// What was said in the recording (an .m4a), and the language Whisper heard ("dutch", "english", …).
+    /// The last recording that was understood, what was heard, and when each word was said (seconds): for voice messages.
+    static var lastRecording: URL?
+    static var lastHeard = ""
+    static var lastWords: [(word: String, start: Double, end: Double)] = []
+
     static func transcribe(_ audio: URL, settings: Settings) async throws -> (text: String, language: String) {
         guard !settings.groqKey.isEmpty else { throw Failure(message: settings.say("I need a Groq key first.", "Ik heb eerst een Groq-sleutel nodig.")) }
         let boundary = "Dave-\(UUID().uuidString)"
@@ -116,6 +121,8 @@ enum Groq {
         }
         field("model", "whisper-large-v3-turbo")
         field("response_format", "verbose_json")
+        field("timestamp_granularities[]", "word") // when each word was said ("send Alex a voice message …")
+        field("timestamp_granularities[]", "segment")
         field("prompt", "Hé \(settings.displayName), zet de muziek op pauze. Hey \(settings.displayName), what's the weather tomorrow?")
         body.append("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"speech.m4a\"\r\nContent-Type: audio/m4a\r\n\r\n".data(using: .utf8)!)
         body.append(try Data(contentsOf: audio))
@@ -132,6 +139,15 @@ enum Groq {
             throw failure(status: status, text: String(data: data, encoding: .utf8) ?? "", settings: settings)
         }
         let text = (json["text"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        // Kept for voice messages: the recording (copied: the next one overwrites it), what was heard, and when each word was said
+        let kept = FileManager.default.temporaryDirectory.appendingPathComponent("last-speech.m4a")
+        try? FileManager.default.removeItem(at: kept)
+        try? FileManager.default.copyItem(at: audio, to: kept)
+        lastRecording = kept
+        lastHeard = text
+        lastWords = (json["words"] as? [[String: Any]] ?? []).map {
+            (word: ($0["word"] as? String ?? "").trimmingCharacters(in: .whitespaces), start: ($0["start"] as? NSNumber)?.doubleValue ?? 0, end: ($0["end"] as? NSNumber)?.doubleValue ?? 0)
+        }
         return (isHallucination(text) ? "" : text, json["language"] as? String ?? "")
     }
 
