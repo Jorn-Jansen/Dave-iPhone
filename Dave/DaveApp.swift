@@ -30,6 +30,7 @@ struct DaveApp: App {
 struct RootView: View {
     @ObservedObject private var settings = Settings.shared
     @StateObject private var data = PCData()
+    @ObservedObject private var chat = SocialChat.shared
     @State private var tab = 0
 
     var body: some View {
@@ -38,7 +39,7 @@ struct RootView: View {
                 .tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right.fill") }.tag(0)
             SocialPanel(data: data)
                 .tabItem { Label(settings.say("Social", "Sociaal"), systemImage: "person.2.fill") }.tag(1)
-                .badge(data.friends.reduce(0) { $0 + $1.unread + ($1.status == "incoming" ? 1 : 0) })
+                .badge(chat.unread + data.friends.filter { $0.status == "incoming" }.count)
             RemindersPanel(data: data)
                 .tabItem { Label(settings.say("Reminders", "Herinneringen"), systemImage: "alarm.fill") }.tag(2)
             MemoriesPanel(data: data)

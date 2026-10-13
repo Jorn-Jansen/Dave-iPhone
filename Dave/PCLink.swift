@@ -38,6 +38,12 @@ enum PCLink {
         return try await post("/state", body: [:], settings: settings, timeout: 15)
     }
 
+    /// Your friend code, private key and friends (with their public keys), so the app can chat on its own (SocialChat).
+    static func socialIdentity(settings: Settings) async throws -> [String: Any] {
+        try await hello(settings: settings)
+        return try await post("/social", body: [:], settings: settings, timeout: 15)
+    }
+
     /// A change from the app's tabs ("deleteReminder", "addMemory"…); returns the new state.
     static func change(_ change: [String: Any], settings: Settings) async throws -> [String: Any] {
         try await post("/action", body: change, settings: settings, timeout: 15)
