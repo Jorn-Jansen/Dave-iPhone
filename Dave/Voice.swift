@@ -61,7 +61,7 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
     func speak(_ text: String, language: String, rate: Double, pitch: Double = 1, volume: Double = 1) async {
         stopSpeaking()
         try? prepareAudio()
-        let utterance = AVSpeechUtterance(string: text)
+        let utterance = AVSpeechUtterance(string: Self.withoutLinks(text)) // a web address is never read out: its short name instead
         utterance.voice = bestVoice(for: language)
         utterance.rate = Float(min(Double(AVSpeechUtteranceMaximumSpeechRate), max(Double(AVSpeechUtteranceMinimumSpeechRate), rate)))
         utterance.pitchMultiplier = Float(pitch)
@@ -70,6 +70,30 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
             finishedSpeaking = done
             synthesizer.speak(utterance)
         }
+    }
+
+    /// Web addresses replaced by what they are, said short: a page's own name when the address has one
+    /// (roblox.com/games/107778070777162/Steal-An-Egg → "Steal An Egg"), otherwise the site ("Roblox").
+    static func withoutLinks(_ text: String) -> String {
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return text }
+        var result = text
+        for match in detector.matches(in: text, range: NSRange(text.startIndex..., in: text)).reversed() {
+            guard let url = match.url, url.scheme?.hasPrefix("http") == true, let range = Range(match.range, in: result) else { continue }
+            let name = url.pathComponents.compactMap { $0.removingPercentEncoding }.last { part in
+                part.count > 3 && part.count < 80 && part.range(of: #"^[\p{L}\d]+([-_+][\p{L}\d]+)+$"#, options: .regularExpression) != nil && part.contains { $0.isLetter }
+            }
+            var spoken: String
+            if let name { spoken = name.replacingOccurrences(of: #"[-_+]"#, with: " ", options: .regularExpression) }
+            else {
+                var host = url.host ?? ""
+                if host.hasPrefix("www.") { host.removeFirst(4) }
+                let parts = host.split(separator: ".")
+                spoken = parts.count >= 2 ? String(parts[parts.count - 2]) : host
+                spoken = spoken.prefix(1).uppercased() + spoken.dropFirst()
+            }
+            result.replaceSubrange(range, with: spoken)
+        }
+        return result
     }
 
     func stopSpeaking() {
