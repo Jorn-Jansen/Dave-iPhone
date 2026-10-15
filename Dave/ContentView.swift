@@ -7,6 +7,7 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var updateStatus = ""
     @ObservedObject private var settings = Settings.shared
+    @ObservedObject private var stopwatch = PhoneStopwatch.shared
     @State private var typed = ""
     @State private var showSettings = false
     @FocusState private var typing: Bool
@@ -17,6 +18,7 @@ struct ContentView: View {
             VStack(spacing: 0) {
                 header
                 if let release = updater.available { updateNotice(release) }
+                if stopwatch.on || stopwatch.stoppedAt != nil { StopwatchCard().transition(.move(edge: .top).combined(with: .opacity)) }
                 chat
                 controls
             }

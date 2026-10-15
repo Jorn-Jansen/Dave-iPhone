@@ -454,6 +454,8 @@ final class Brain: ObservableObject {
             }
             return (await PhoneReminders.set(args, settings: settings), [])
 
+        case "stopwatch": return (PhoneStopwatch.shared.run(args["action"] as? String ?? "check", settings: settings), [])
+
         case "send_to_pc":
             return (await PhoneTools.sendToPC(args, settings: settings, pickFile: { await self.pickFile() }), [])
         case "open_app": return (await PhoneTools.openApp(args, settings: settings), [])

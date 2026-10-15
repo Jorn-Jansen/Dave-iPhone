@@ -26,6 +26,11 @@ enum PhoneTools {
                   "repeat": ["type": "string", "enum": ["none", "daily"]],
                   "which": str("cancel: words from the reminder; empty for all")],
                  required: ["action"]),
+            tool("stopwatch", "The stopwatch on this iPhone (counting up, not a timer): 'start a stopwatch' (start), 'lap' / 'ronde' (lap), "
+                 + "'how long has it been?' (check), 'pause the stopwatch' (pause), 'carry on' (resume), 'stop the stopwatch' (stop: says the total "
+                 + "and the laps), 'reset it' (reset).",
+                 ["action": ["type": "string", "enum": ["start", "lap", "check", "pause", "resume", "stop", "reset"]]],
+                 required: ["action"]),
             tool("send_to_pc", "Send something from this iPhone to the user's PC: what they copied (a link opens in the PC's browser, "
                  + "text goes on the PC's clipboard, a picture is saved), their last photo, or a file they pick (saved in Downloads on the PC).",
                  ["what": ["type": "string", "enum": ["clipboard", "last_photo", "file"]]],
