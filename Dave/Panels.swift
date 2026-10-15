@@ -266,6 +266,8 @@ struct RemindersPanel: View {
 struct MemoriesPanel: View {
     @ObservedObject var data: PCData
     @State private var newMemory = ""
+    @State private var editing: String?   // the memory being changed (tap one)
+    @State private var editedText = ""
     private let settings = Settings.shared
 
     var body: some View {
@@ -285,14 +287,30 @@ struct MemoriesPanel: View {
                                       "Dave gebruikt deze op je pc en hier. Je kunt ook zeggen \"onthoud dat…\"."))
                 }
                 Section {
-                    ForEach(data.memories, id: \.self) { memory in row { Text(memory) } }
+                    ForEach(data.memories, id: \.self) { memory in
+                        row {
+                            Button { editing = memory; editedText = memory } label: {
+                                Text(memory).foregroundStyle(.primary).frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
                         .onDelete { offsets in
                             for index in offsets { let text = data.memories[index]; Task { await data.change(["type": "deleteMemory", "text": text]) } }
                         }
                 } header: {
-                    Text(settings.say("What I remember · swipe to forget", "Wat ik onthoud · veeg om te vergeten"))
+                    Text(settings.say("What I remember · tap to change, swipe to forget", "Wat ik onthoud · tik om te veranderen, veeg om te vergeten"))
                 }
             }
+        }
+        .alert(settings.say("Change memory", "Herinnering veranderen"), isPresented: Binding(get: { editing != nil }, set: { if !$0 { editing = nil } })) {
+            TextField(settings.say("What to remember", "Wat te onthouden"), text: $editedText, axis: .vertical)
+            Button(settings.say("Save", "Opslaan")) {
+                let text = editedText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let old = editing, text != old { Task { await data.change(["type": "editMemory", "text": old, "newText": text]) } }
+                editing = nil
+            }
+            Button(settings.say("Cancel", "Annuleren"), role: .cancel) { editing = nil }
         }
     }
 
