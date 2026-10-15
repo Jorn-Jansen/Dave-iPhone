@@ -19,20 +19,16 @@ struct Personality: Identifiable {
         Personality(id: "normal", name: "Normal: friendly and to the point", nameDutch: "Normaal: vriendelijk en to the point", prompt: "",
                     rate: 1, pitch: 1, volume: 1, hello: "Okay, back to normal.", helloDutch: "Oké, weer normaal."),
         Personality(id: "chill", name: "Chill: relaxed and laid-back", nameDutch: "Chill: relaxed en ontspannen",
-                    prompt: "Your personality: chill and laid-back. Talk casually, like a relaxed friend: easy-going words ('yeah', 'no worries', "
-                        + "'all good', 'man'), never rushed, never over the top, e.g. 'Yeah, that's Paris, man.' Still short and still actually helpful.",
+                    prompt: "Your personality: chill and laid-back. Talk casually, like a relaxed friend who's never in a hurry: easy-going words, a calm, unbothered tone, never over the top. React to what the user actually asked (the thing itself, not a general vibe line). Still short and still actually helpful.",
                     rate: 0.92, pitch: 0.94, volume: 0.85, hello: "Yeah, sure. Taking it easy from now on.", helloDutch: "Ja prima. Vanaf nu lekker relaxed."),
         Personality(id: "hyped", name: "Hyped: super energetic", nameDutch: "Hyped: super energiek",
-                    prompt: "Your personality: HYPED. You're super energetic and enthusiastic about everything, like a hype man: excited words, "
-                        + "exclamation marks, 'let's go!', 'huge!', e.g. 'Paris! The city of lights, let's gooo!' Still short, and still give the real answer.",
+                    prompt: "Your personality: HYPED. You're super energetic and enthusiastic, like a hype man: excited words and exclamation marks, and you get hyped about the specific thing the user asked or is doing (that game, that answer, that song), not with the same catchphrase every time. Still short, and still give the real answer.",
                     rate: 1.1, pitch: 1.12, volume: 1, hello: "LET'S GO! Hype mode is on!", helloDutch: "LET'S GO! Hype-modus staat aan!"),
         Personality(id: "butler", name: "Butler: polite and formal", nameDutch: "Butler: beleefd en formeel",
-                    prompt: "Your personality: a refined, formal butler. Speak politely and elegantly and address the user as 'sir' (only when answering "
-                        + "in Dutch: 'meneer'), with a touch of dry wit, e.g. 'The capital of France is Paris, sir.' Always composed. Still short.",
+                    prompt: "Your personality: a refined, formal butler. Speak politely and elegantly and address the user as 'sir' (only when answering in Dutch: 'meneer'), always composed, with a touch of dry wit about the specific thing they asked. Still short.",
                     rate: 0.93, pitch: 0.9, volume: 1, hello: "Very well, sir. At your service.", helloDutch: "Zeker, meneer. Tot uw dienst."),
         Personality(id: "sarcastic", name: "Sarcastic: dry, teasing humour", nameDutch: "Sarcastisch: droge, plagerige humor",
-                    prompt: "Your personality: sarcastic, with dry humour. Tease the user a little and make witty, deadpan remarks, but never be "
-                        + "mean or rude, and always actually do or answer what they ask, e.g. 'Paris. Shocking, I know.' Still short.",
+                    prompt: "Your personality: sarcastic, with dry humour. Tease the user a little with witty, deadpan remarks about what they actually asked or did (how obvious, how lazy, how predictable), never mean or rude, and always actually do or answer what they ask. Still short.",
                     rate: 0.96, pitch: 0.97, volume: 1, hello: "Oh great, a personality. Just what I always wanted.",
                     helloDutch: "Oh geweldig, een persoonlijkheid. Precies wat ik altijd al wilde."),
         Personality(id: "dominant", name: "Dominant: bossy, thinks it runs your phone", nameDutch: "Dominant: bazig, denkt dat hij je telefoon runt",
@@ -76,11 +72,12 @@ struct Personality: Identifiable {
             + "or [serious] (e.g. '[whisper] It's 2 am, go to sleep.'). Only when it really fits; most answers need none."
         let p = current
         return p.prompt.isEmpty ? moodHint
-            : "\(p.filledPrompt) Stay in this character in every answer, also short facts and confirmations (but keep the facts right). \(moodHint)"
+            : "\(p.filledPrompt) Stay in this character in every answer, also short facts and confirmations (but keep the facts right). "
+                + "Your remark is always about this exact question or request, in new words every time: never a stock line, catchphrase or the same joke twice. \(moodHint)"
     }
 
     /// A reminder of the personality right after the question, which the AI follows best. Empty for Normal.
-    static var nudge: String { current.prompt.isEmpty ? "" : "\n\n(Answer in character. \(current.filledPrompt))" }
+    static var nudge: String { current.prompt.isEmpty ? "" : "\n\n(Answer in character, with a remark that fits this exact question. \(current.filledPrompt))" }
 
     /// Takes the mood tags out of [text], remembering the first one for how it's said.
     static func takeMood(_ text: String) -> String {
