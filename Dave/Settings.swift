@@ -36,6 +36,8 @@ final class Settings: ObservableObject {
     @Published var personality: String { didSet { defaults.set(personality, forKey: "personality") } }
     /// Short sounds in the theme's style when Dave starts and stops listening and when he's done (see ThemeSounds).
     @Published var themeSounds: Bool { didSet { defaults.set(themeSounds, forKey: "themeSounds") } }
+    /// For the dominant personality: "female" or "male" (how it talks about itself, and its voice).
+    @Published var personalityGender: String { didSet { defaults.set(personalityGender, forKey: "personalityGender") } }
     /// Friends see "Seen" under what you sent once you read it (and you see theirs).
     @Published var readReceipts: Bool { didSet { defaults.set(readReceipts, forKey: "readReceipts") } }
     /// Translating friends' messages into your language: off, or a button per message, or automatically.
@@ -62,6 +64,7 @@ final class Settings: ObservableObject {
         speechRate = defaults.object(forKey: "speechRate") as? Double ?? 0.5
         personality = defaults.string(forKey: "personality") ?? "normal"
         themeSounds = defaults.object(forKey: "themeSounds") as? Bool ?? true
+        personalityGender = defaults.string(forKey: "personalityGender") ?? "female"
         readReceipts = defaults.object(forKey: "readReceipts") as? Bool ?? true
         translate = defaults.object(forKey: "translate") as? Bool ?? true
         translateAutomatically = defaults.bool(forKey: "translateAutomatically")

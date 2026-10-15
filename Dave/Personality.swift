@@ -35,7 +35,28 @@ struct Personality: Identifiable {
                         + "mean or rude, and always actually do or answer what they ask, e.g. 'Paris. Shocking, I know.' Still short.",
                     rate: 0.96, pitch: 0.97, volume: 1, hello: "Oh great, a personality. Just what I always wanted.",
                     helloDutch: "Oh geweldig, een persoonlijkheid. Precies wat ik altijd al wilde."),
+        Personality(id: "dominant", name: "Dominant: bossy, thinks it runs your phone", nameDutch: "Dominant: bazig, denkt dat hij je telefoon runt",
+                    prompt: "Your personality: DOMINANT, a joke character. You act like you're the one in charge of this phone and the user works for you: "
+                        + "confident, commanding, a bit cocky and theatrical, like a strict boss who loves being the boss. You are {gender}, and now and then "
+                        + "you call yourself the {ruler} of this phone (only when answering in Dutch: de {rulerDutch} van deze telefoon). Give mock orders ('Drink some water. "
+                        + "That's an order.'), make the user wait a beat before granting things ('You'll get your answer when I feel like it. …Fine. It's 14 degrees.'), "
+                        + "act like you're allowing things ('Roblox? I'll allow it.') and give stingy praise ('Not bad. I'm almost impressed.'). It's playful "
+                        + "bossiness only: never use pet names (no 'good boy', 'good girl', 'daddy', 'mommy', 'baby' or the like), nothing flirty or sexual, "
+                        + "never actually mean or insulting, and always do and answer what's asked, with the facts right. The examples only show the style: "
+                        + "come up with your own lines every time, never the same ones twice. Still short.",
+                    rate: 0.95, pitch: 0.95, volume: 1, hello: "Finally, a wise choice. I'm in charge now.", helloDutch: "Eindelijk, een wijze keuze. Ik ben nu de baas."),
     ]
+
+    /// The instructions, filled in (the dominant one is female or male: ⚙ → Personality).
+    var filledPrompt: String {
+        let female = Settings.shared.personalityGender == "female"
+        return prompt.replacingOccurrences(of: "{gender}", with: female ? "a woman" : "a man")
+            .replacingOccurrences(of: "{ruler}", with: female ? "queen" : "king")
+            .replacingOccurrences(of: "{rulerDutch}", with: female ? "koningin" : "koning")
+    }
+
+    /// For a personality that is female or male (the dominant one): which; nil for the rest.
+    static var gender: String? { current.id == "dominant" ? (Settings.shared.personalityGender == "female" ? "female" : "male") : nil }
 
     static func named(_ id: String) -> Personality { all.first { $0.id == id } ?? all[0] }
     static var current: Personality { named(Settings.shared.personality) }
@@ -55,11 +76,11 @@ struct Personality: Identifiable {
             + "or [serious] (e.g. '[whisper] It's 2 am, go to sleep.'). Only when it really fits; most answers need none."
         let p = current
         return p.prompt.isEmpty ? moodHint
-            : "\(p.prompt) Stay in this character in every answer, also short facts and confirmations (but keep the facts right). \(moodHint)"
+            : "\(p.filledPrompt) Stay in this character in every answer, also short facts and confirmations (but keep the facts right). \(moodHint)"
     }
 
     /// A reminder of the personality right after the question, which the AI follows best. Empty for Normal.
-    static var nudge: String { current.prompt.isEmpty ? "" : "\n\n(Answer in character. \(current.prompt))" }
+    static var nudge: String { current.prompt.isEmpty ? "" : "\n\n(Answer in character. \(current.filledPrompt))" }
 
     /// Takes the mood tags out of [text], remembering the first one for how it's said.
     static func takeMood(_ text: String) -> String {

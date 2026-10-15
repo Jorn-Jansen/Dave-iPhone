@@ -80,7 +80,12 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
     /// The most natural installed voice for the language (Premium or Enhanced ones when you've downloaded them in iOS' settings).
     private func bestVoice(for language: String) -> AVSpeechSynthesisVoice? {
         let prefix = String(language.prefix(2))
-        let voices = AVSpeechSynthesisVoice.speechVoices().filter { $0.language.hasPrefix(prefix) }
+        var voices = AVSpeechSynthesisVoice.speechVoices().filter { $0.language.hasPrefix(prefix) }
+        // A female or male personality (the dominant one): a voice of that gender, if there is one
+        if let gender = Personality.gender {
+            let matching = voices.filter { $0.gender == (gender == "female" ? .female : .male) }
+            if !matching.isEmpty { voices = matching }
+        }
         return voices.max { a, b in
             if a.quality != b.quality { return a.quality.rawValue < b.quality.rawValue }
             return (a.language == language ? 1 : 0) < (b.language == language ? 1 : 0)

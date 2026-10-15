@@ -132,6 +132,12 @@ struct SettingsView: View {
                     Picker(settings.say("Personality", "Persoonlijkheid"), selection: $settings.personality) {
                         ForEach(Personality.all) { p in Text(settings.say(p.name, p.nameDutch)).tag(p.id) }
                     }
+                    if settings.personality == "dominant" { // female or male: how it talks about itself, and its voice
+                        Picker(settings.say("Dominant as", "Dominant als"), selection: $settings.personalityGender) {
+                            Text(settings.say("Female (the queen)", "Vrouw (de koningin)")).tag("female")
+                            Text(settings.say("Male (the king)", "Man (de koning)")).tag("male")
+                        }
+                    }
                     Slider(value: $settings.speechRate, in: 0.4...0.6) {
                         Text(settings.say("Speaking speed", "Spreeksnelheid"))
                     } minimumValueLabel: { Image(systemName: "tortoise") } maximumValueLabel: { Image(systemName: "hare") }
