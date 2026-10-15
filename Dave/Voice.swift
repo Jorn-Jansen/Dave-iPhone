@@ -61,7 +61,8 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
     func speak(_ text: String, language: String, rate: Double, pitch: Double = 1, volume: Double = 1) async {
         stopSpeaking()
         try? prepareAudio()
-        let utterance = AVSpeechUtterance(string: Self.withoutLinks(text)) // a web address is never read out: its short name instead
+        let spoken = String(String.UnicodeScalarView(Self.withoutLinks(text).unicodeScalars.filter { !($0.properties.isEmojiPresentation || ($0.properties.isEmoji && $0.value > 0x2000)) && $0.value != 0xFE0F && $0.value != 0x200D }))
+        let utterance = AVSpeechUtterance(string: spoken) // no web addresses (their short name instead) and no emoji ("🚀" would be said as "rocket")
         utterance.voice = bestVoice(for: language)
         utterance.rate = Float(min(Double(AVSpeechUtteranceMaximumSpeechRate), max(Double(AVSpeechUtteranceMinimumSpeechRate), rate)))
         utterance.pitchMultiplier = Float(pitch)
