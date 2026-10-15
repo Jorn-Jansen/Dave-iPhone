@@ -63,13 +63,24 @@ struct Personality: Identifiable {
     private static let moods: [String: (rate: Double, pitch: Double, volume: Double)] = [
         "excited": (1.08, 1.12, 1), "cheerful": (1.03, 1.06, 1), "calm": (0.93, 0.96, 0.9),
         "whisper": (0.9, 0.95, 0.5), "sad": (0.9, 0.9, 0.85), "serious": (0.97, 0.94, 1),
+        "confident": (0.98, 0.95, 1), "angry": (1.06, 0.9, 1), "shouting": (1.08, 1.1, 1), "friendly": (1.02, 1.04, 1),
+        "unfriendly": (0.96, 0.92, 1), "scared": (1.12, 1.15, 0.85), "hopeful": (1, 1.05, 1), "empathetic": (0.92, 0.97, 0.9),
+        "embarrassed": (0.95, 1.02, 0.8),
+    ]
+    /// Other words the AI uses for a mood (any other tag is just taken out of the text).
+    private static let moodWords: [String: String] = [
+        "proud": "confident", "bossy": "confident", "smug": "confident", "cocky": "confident", "stern": "serious", "strict": "serious",
+        "happy": "cheerful", "playful": "cheerful", "hyped": "excited", "energetic": "excited", "relaxed": "calm", "chill": "calm",
+        "soft": "whisper", "whispering": "whisper", "quiet": "whisper", "mad": "angry", "annoyed": "unfriendly", "grumpy": "unfriendly",
+        "yelling": "shouting", "loud": "shouting", "afraid": "scared", "terrified": "scared", "nervous": "scared", "warm": "friendly",
+        "kind": "empathetic", "caring": "empathetic", "shy": "embarrassed", "awkward": "embarrassed", "optimistic": "hopeful",
     ]
     private static var mood: String?
 
     /// For the AI's instructions: the personality, and how to set a mood.
     static var instruction: String {
-        let moodHint = "You may start an answer with one mood tag for how your voice says it: [excited], [cheerful], [calm], [whisper], [sad] "
-            + "or [serious] (e.g. '[whisper] It's 2 am, go to sleep.'). Only when it really fits; most answers need none."
+        let moodHint = "You may start an answer with one mood tag for how your voice says it: [excited], [cheerful], [calm], [whisper], [sad], "
+            + "[serious], [confident], [angry], [shouting], [friendly], [unfriendly], [scared], [hopeful], [empathetic] or [embarrassed] (e.g. '[whisper] It's 2 am, go to sleep.'). Only when it really fits; most answers need none."
         let p = current
         return p.prompt.isEmpty ? moodHint
             : "\(p.filledPrompt) Stay in this character in every answer, also short facts and confirmations (but keep the facts right). "
@@ -81,11 +92,13 @@ struct Personality: Identifiable {
 
     /// Takes the mood tags out of [text], remembering the first one for how it's said.
     static func takeMood(_ text: String) -> String {
-        let pattern = #"\[\s*(excited|cheerful|calm|whisper|sad|serious)\s*\]\s*"#
+        let pattern = #"\[\s*([a-zA-Z][a-zA-Z\- ]{1,20}?)\s*\]\s*"#
         guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { return text }
         let range = NSRange(text.startIndex..., in: text)
         if let match = regex.firstMatch(in: text, range: range), let found = Range(match.range(at: 1), in: text) {
-            mood = text[found].lowercased()
+            var word = text[found].trimmingCharacters(in: .whitespaces).lowercased()
+            word = moodWords[word] ?? word
+            if moods[word] != nil { mood = word }
         }
         return regex.stringByReplacingMatches(in: text, range: range, withTemplate: "").trimmingCharacters(in: .whitespacesAndNewlines)
     }
