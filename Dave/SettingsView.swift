@@ -70,10 +70,15 @@ struct SettingsView: View {
 
                 Section {
                     SecureField("gsk_…", text: $settings.groqKey).autocorrectionDisabled().textInputAutocapitalization(.never)
+                    SecureField(settings.say("Extra keys: gsk_… gsk_… (in order)", "Extra sleutels: gsk_… gsk_… (in volgorde)"), text: Binding(
+                        get: { settings.groqKeys.joined(separator: " ") },
+                        set: { settings.groqKeys = $0.split(whereSeparator: { " ,;\n".contains($0) }).map(String.init).filter { $0 != settings.groqKey } }))
+                        .autocorrectionDisabled().textInputAutocapitalization(.never)
                 } header: {
                     Text(settings.say("Groq key", "Groq-sleutel"))
                 } footer: {
-                    Text(settings.say("Free at console.groq.com/keys. Filled in by connecting to your PC.", "Gratis op console.groq.com/keys. Wordt ingevuld door te koppelen."))
+                    Text(settings.say("Free at console.groq.com/keys. Filled in by connecting to your PC. Extra keys (other accounts): when a key is at a limit, Dave goes on with the next one.",
+                                      "Gratis op console.groq.com/keys. Wordt ingevuld door te koppelen. Extra sleutels (andere accounts): zit een sleutel aan een limiet, dan gaat Dave verder met de volgende."))
                 }
 
                 Section {
@@ -191,6 +196,7 @@ struct SettingsView: View {
         do {
             let config = try await PCLink.pair(settings: settings)
             if let key = config["groqKey"] as? String, !key.isEmpty { settings.groqKey = key }
+            if let keys = config["groqKeys"] as? [String], !keys.isEmpty { settings.groqKeys = keys } // (the PC's extra keys too)
             if let name = config["name"] as? String, !name.isEmpty { settings.name = name }
             if let language = config["language"] as? String { settings.language = language.hasPrefix("nl") ? "nl-NL" : "en-US" }
             if let country = config["country"] as? String, !country.isEmpty { settings.country = country }

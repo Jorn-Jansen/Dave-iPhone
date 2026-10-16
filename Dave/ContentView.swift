@@ -33,7 +33,7 @@ struct ContentView: View {
             // Closed without picking: let Dave know (a pick arrives before this, so it isn't lost)
             if !picking { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { brain.filePicked(nil) } }
         }
-        .onAppear { if settings.groqKey.isEmpty { showSettings = true } }
+        .onAppear { if settings.allGroqKeys.isEmpty { showSettings = true } }
         .task { await updater.check() }
         .onChange(of: scenePhase) { phase in if phase == .active { Task { await updater.check() } } }
     }

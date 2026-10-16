@@ -6,6 +6,8 @@ final class Settings: ObservableObject {
     private let defaults = UserDefaults.standard
 
     @Published var groqKey: String { didSet { defaults.set(groqKey, forKey: "groqKey") } }
+    /// More Groq keys (other accounts), in order: when the ones before are at a limit, the next one answers (from the PC, or typed).
+    @Published var groqKeys: [String] { didSet { defaults.set(groqKeys, forKey: "groqKeys") } }
     @Published var name: String { didSet { defaults.set(name, forKey: "name") } }
     /// "nl-NL" or "en-US": the language Dave answers typed questions in (spoken ones: the language you spoke).
     @Published var language: String { didSet { defaults.set(language, forKey: "language") } }
@@ -46,6 +48,7 @@ final class Settings: ObservableObject {
 
     private init() {
         groqKey = defaults.string(forKey: "groqKey") ?? ""
+        groqKeys = defaults.stringArray(forKey: "groqKeys") ?? []
         name = defaults.string(forKey: "name") ?? "Dave"
         language = defaults.string(forKey: "language") ?? "nl-NL"
         country = defaults.string(forKey: "country") ?? "the Netherlands"
@@ -68,6 +71,16 @@ final class Settings: ObservableObject {
         readReceipts = defaults.object(forKey: "readReceipts") as? Bool ?? true
         translate = defaults.object(forKey: "translate") as? Bool ?? true
         translateAutomatically = defaults.bool(forKey: "translateAutomatically")
+    }
+
+    /// The Groq keys in their order: the main one, then the extra ones.
+    var allGroqKeys: [String] {
+        var out: [String] = []
+        for key in [groqKey] + groqKeys {
+            let k = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !k.isEmpty && !out.contains(k) { out.append(k) }
+        }
+        return out
     }
 
     var hasPC: Bool { !pcAddress.trimmingCharacters(in: .whitespaces).isEmpty && !pcCode.isEmpty }
