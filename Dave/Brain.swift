@@ -210,7 +210,7 @@ final class Brain: ObservableObject {
     }
 
     private var tools: [[String: Any]] {
-        PhoneTools.definitions + [settingsTool] + (SocialChat.shared.ready ? [messageTool] : []) + (settings.hasPC ? [pcControlTool, pcTool] : [])
+        PhoneTools.definitions + [settingsTool, listsTool] + (SocialChat.shared.ready ? [messageTool] : []) + (settings.hasPC ? [pcControlTool, pcTool] : [])
     }
 
     /// "Tell Alex I'm online", "send Sam a voice message I'll be late": straight from the phone (SocialChat), also without the PC.
@@ -347,6 +347,31 @@ final class Brain: ObservableObject {
         ]
     }
 
+    /// The Lists tab: "zet melk op de boodschappenlijst", "wat staat er op de lijst?", "maak een paklijst".
+    private var listsTool: [String: Any] {
+        let names = Lists.shared.visible.map { $0.name + ($0.space == "house" ? " (house)" : " (just me)") }.joined(separator: ", ")
+        return [
+            "type": "function",
+            "function": [
+                "name": "lists",
+                "description": "The user's lists in the Lists tab (shopping list, chores, …): add things ('zet melk en eieren op de boodschappenlijst': "
+                    + "add, list boodschappen, items 'melk, eieren'), remove them, tick them off, what's on a list (show; no list = all), "
+                    + "make a new list (create, list = its name; shared = true when it's for the whole house), delete a list, or take the "
+                    + "ticked-off ones away (clear_done). Leave list empty when the user doesn't say which. The lists now: " + (names.isEmpty ? "none yet" : names) + ".",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "action": ["type": "string", "enum": ["show", "add", "remove", "check", "uncheck", "create", "delete", "clear_done"]],
+                        "list": ["type": "string", "description": "Which list, by its name; for create: the new list's name"],
+                        "items": ["type": "string", "description": "For add / remove / check / uncheck: the things, comma-separated, short, in the user's language"],
+                        "shared": ["type": "boolean", "description": "For create: true = for the whole house (everyone with the house code), false = just the user"],
+                    ],
+                    "required": ["action"],
+                ] as [String: Any],
+            ] as [String: Any],
+        ]
+    }
+
     private func changeSetting(_ args: [String: Any]) -> String {
         let value = (args["value"] as? String ?? "").trimmingCharacters(in: .whitespaces)
         let lower = value.lowercased()
@@ -443,6 +468,7 @@ final class Brain: ObservableObject {
             }
 
         case "change_setting": return (changeSetting(args), [])
+        case "lists": return (Lists.shared.run(args, settings: settings), [])
         case "send_message": return (await sendMessage(args, question: question), [])
         case "music": return (try await PhoneTools.music(args, settings: settings), [])
 
@@ -655,7 +681,7 @@ final class Brain: ObservableObject {
         Only end with a question when you really need an answer; never add filler questions like "Anything else?".
         """
         prompt += "\nOn this iPhone you can open apps (and search in them), run the user's Shortcuts, work with what they copied, look at their photos, "
-            + "read a file they pick, set reminders and timers on the iPhone (phone_reminder), and send things to their PC (send_to_pc). "
+            + "read a file they pick, set reminders and timers on the iPhone (phone_reminder), keep their lists (lists), and send things to their PC (send_to_pc). "
             + "Use the matching command instead of saying you can't. Reminders and timers go on the iPhone unless they say \"on my PC\"."
         if settings.hasPC {
             prompt += "\nYou also run on the user's Windows PC. For things on that PC (\"on my PC\", \"on my computer\"): pc_control for its music buttons, "
