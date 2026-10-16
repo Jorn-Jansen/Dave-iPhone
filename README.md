@@ -48,3 +48,7 @@ Without a PC, paste your own free Groq key from [console.groq.com/keys](https://
 
 ## Building
 The app is built on GitHub's Macs (`.github/workflows/build.yml`): every push to `main` makes an unsigned `Dave.ipa`. The Xcode project is made from `project.yml` with [XcodeGen](https://github.com/yonaskolb/XcodeGen).
+
+## Licence
+
+[PolyForm Strict 1.0.0](LICENSE): you may download and use Dave for personal, non-commercial use; you may not change, copy, redistribute or sell it.
