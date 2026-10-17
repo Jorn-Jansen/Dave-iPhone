@@ -152,7 +152,7 @@ enum Groq {
         field("response_format", "verbose_json")
         field("timestamp_granularities[]", "word") // when each word was said ("send Alex a voice message …")
         field("timestamp_granularities[]", "segment")
-        field("prompt", "Hé \(settings.displayName), zet de muziek op pauze. Hey \(settings.displayName), what's the weather tomorrow?")
+        field("prompt", "\(settings.displayName).") // (only the name: Whisper repeats its hint on noise, and a command in it would be carried out)
         body.append("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"speech.\(audio.pathExtension.isEmpty ? "m4a" : audio.pathExtension)\"\r\nContent-Type: application/octet-stream\r\n\r\n".data(using: .utf8)!)
         body.append(try Data(contentsOf: audio))
         body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
@@ -226,6 +226,7 @@ enum Groq {
     private static func isHallucination(_ text: String) -> Bool {
         let t = text.lowercased().trimmingCharacters(in: .punctuationCharacters.union(.whitespaces))
         return ["", "thank you", "thanks for watching", "bedankt voor het kijken", "you", "ondertiteling", "subtitles", "bye"].contains(t)
+            || !t.contains(where: { $0.isLetter || $0.isNumber }) // ("***", "...": what Whisper gives for noise)
             || t.contains("amara.org") || t.contains("ondertiteld door")
     }
 }
