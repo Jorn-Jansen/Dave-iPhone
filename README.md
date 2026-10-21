@@ -1,0 +1,54 @@
+# Dave for iPhone
+
+Dave, the voice assistant, as an iPhone app. Tap the orb and talk (English or Dutch), or type. He answers out loud, searches the web for anything current, and can hand things to [Dave on your Windows PC](https://github.com/Jorn-Jansen/Dave-Windows): "pause the music on my PC", "lock my PC", "what did I miss on Discord?".
+
+## What he can do on the iPhone
+- **Music:** "play the music", "pause", "next song", "what's playing?", "play lofi", "play my Chill playlist": Spotify
+  (Premium) on whichever device it plays on, or Apple Music when you're not logged in to Spotify
+- **Your PC:** "pause the music on my PC", "PC volume to 20", "lock my PC", "turn off my PC in 30 minutes", "open Roblox on my PC",
+  "what's on my PC screen?", "is my PC still downloading?", "where did I leave off on my PC?"
+- **Reminders and timers on the iPhone:** "remind me at 8 to call mom", "timer for 10 minutes" (real notifications, also with the PC off)
+- **Siri:** "Hey Siri, ask Dave" — Siri asks your question, Dave answers
+- **Send to your PC:** "send my last photo to my PC", "send what I copied to my PC", or "Open in Dave" for a file
+- **Apps:** "open Spotify", "search lofi in Spotify", "directions to Utrecht", "open reddit.com"
+- **Shortcuts:** "run my shortcut Goodnight" (a Siri Shortcut can open any app or change settings)
+- **Clipboard:** "what did I copy?", "translate what I copied", "what's in the picture I copied?"
+- **Photos:** "find my photos of a dog", "what's in my last screenshot?", "how many photos did I take yesterday?",
+  "show my favourites from last week" (what's in your photos is recognised on the iPhone itself)
+- **Files:** "read this file", "summarise a PDF" (you pick the file)
+- **Tabs like Dave's window on the PC:** your reminders, memories, music and screen time (with Dave on your PC)
+- **Themes:** the same 16 as on the PC (Aurora, Ember, Toxic, Ocean, Sakura, Midnight, Frost, Synthwave, Storm, Firefly, Matrix, Lava, Galaxy, Zen, Glitch, Legacy), in the settings
+- **The same settings as on your PC:** theme, name, personality, language… change one on either and the other follows
+
+iOS only lets apps open other apps through links (most well-known apps have one), and only lets them see files you pick.
+
+
+## Install
+Dave isn't in the App Store, so you sideload him with your own Apple ID:
+1. Download **Dave.ipa** from the latest [release](../../releases/latest).
+2. Install it with [Sideloadly](https://sideloadly.io) or [AltStore](https://altstore.io).
+   With a free Apple ID the app has to be refreshed every 7 days (AltStore can do that by itself).
+
+## Connect to your PC
+1. On the PC: Dave's settings → **Connections → iPhone app** → turn on and save. A QR code shows up there.
+2. Scan it with your iPhone's camera: Dave opens and connects. (Or tap **Copy link** on the PC and paste it in the app's settings.)
+   This also copies your Groq key, name and settings, and from then on your theme, personality and language stay the same on both.
+
+The phone and PC need to be on the same Wi-Fi. To use it outside your home, install [Tailscale](https://tailscale.com) on both, log in with the same account, and scan the QR code once more.
+
+## Notifications from your PC
+Reminders and heads-ups from your PC ("Roblox closed", "your download is done") and things you send from the PC ("send this to my phone")
+arrive as notifications through the free [ntfy](https://ntfy.sh) app: on the PC turn on Dave's settings → iPhone app → **Notifications on my phone**,
+then in ntfy tap + and subscribe to the channel shown there (also under ⚙ in this app).
+
+## Spotify
+1. On [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard) → your Spotify app (the one Dave on the PC uses) →
+   **Settings → Edit → Redirect URIs**: add `dave-iphone://spotify-callback` and save.
+2. In the app: settings (⚙) → **Log in to Spotify**. (Connecting to your PC fills in the Client ID.)
+
+Without a PC, paste your own free Groq key from [console.groq.com/keys](https://console.groq.com/keys) in the settings.
+
+## Licence
+[PolyForm Strict 1.0.0](LICENSE): you may download and use Dave for personal, non-commercial use; you may not change, copy, redistribute or sell it.
+
+The source code is private. This page is for downloading Dave.
